@@ -1060,7 +1060,7 @@ const forward = (out = new Vector3()) => out.set(Math.cos(diver.pitch) * Math.co
 
 // ---------- settings & progress (saved in this browser) ----------
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } } };
-const settings = Object.assign({ hideNames: true, sound: true, volume: 0.7, bloom: true, shadows: true, touch: 'auto' }, store.get('scuba-settings', {}));
+const settings = Object.assign({ hideNames: true, sound: true, volume: 0.7, bloom: true, shadows: true, touch: 'auto', camK: 0.65 }, store.get('scuba-settings', {}));
 const progress = Object.assign({ discovered: {}, badges: {}, goals: {}, targets: {} }, store.get('scuba-progress', {}));
 const saveSettings = () => store.set('scuba-settings', settings), saveProgress = () => store.set('scuba-progress', progress);
 const kindName = sp => (sp.kind || (CORAL.has(sp.type) ? 'coral' : KIND[sp.type])).toLowerCase();
@@ -1321,9 +1321,11 @@ function frame(now, manual) {
   const fp = firstPerson || camMode;
   diverModel.grp.visible = !fp;
   if (fp) camera.position.copy(diver.p).addScaledVector(f, G.fp[0]).add(_v.set(0, G.fp[1], 0));
-  else { camera.position.copy(diver.p).addScaledVector(f, -G.cam[0]).add(_v.set(0, G.cam[1], 0)); pushOut(camera.position, 0.3); }
+  const side = _v2.set(Math.sin(diver.yaw), 0, Math.cos(diver.yaw)).multiplyScalar(G.cam[0] * settings.camK * 0.18).clone();   // over the right shoulder
+  if (!fp) { camera.position.copy(diver.p).addScaledVector(f, -G.cam[0] * settings.camK).add(side).add(_v.set(0, G.cam[1] * settings.camK, 0)); pushOut(camera.position, 0.3); }
   if (camera.position.y > -0.12) camera.position.y = -0.12;
-  camera.lookAt(_v.copy(diver.p).addScaledVector(f, 8).add(_v2.set(0, 0.9, 0)));
+  if (fp) camera.lookAt(_v.copy(camera.position).add(f));
+  else camera.lookAt(_v.copy(diver.p).addScaledVector(f, G.cam[0] * settings.camK * 0.7).add(side).add(_v2.set(0, G.cam[1] * settings.camK * 0.4, 0)));   // close over-the-shoulder view
   if (debugCam?.target) { camera.position.copy(debugCam.target.p).add(debugCam.off); camera.lookAt(debugCam.target.p); }
   else if (debugCam) { camera.position.copy(diver.p).add(debugCam.off); camera.lookAt(_v.copy(diver.p).add(debugCam.look || _v2.set(0, 0, 0))); }
   diverModel.grp.position.copy(diver.p);
@@ -1753,7 +1755,8 @@ $('ph-close').onclick = () => { $('photos').hidden = true; };
 $('ph-filters').onclick = e => { const f = e.target.dataset?.f; if (f) { logFilter = f; renderPhotos(); } };
 $('pv-back').onclick = () => { $('pv').hidden = true; };
 $('pv-delete').onclick = async () => { if (!viewing || !confirm('Delete this photo?')) return; photos = photos.filter(p => p !== viewing); await photoDB.del(viewing.id); updateShotCount(); $('pv').hidden = true; renderPhotos(); };
-canvas.addEventListener('wheel', e => { if (!camMode) return; e.preventDefault(); zoom = clamp(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 1, 4); updateZoom(); }, { passive: false });
+const viewDistance = k => { settings.camK = clamp(settings.camK * k, 0.35, 2); saveSettings(); };   // third-person camera distance
+canvas.addEventListener('wheel', e => { if (!site) return; e.preventDefault(); if (camMode) { zoom = clamp(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 1, 4); updateZoom(); } else viewDistance(e.deltaY < 0 ? 1 / 1.1 : 1.1); }, { passive: false });
 
 // ---------- dive summary ----------
 function endDive() {
@@ -2017,8 +2020,8 @@ addEventListener('keydown', e => {
   if (uiOpen()) return;
   if (e.code === 'KeyF') { setCamMode(!camMode); return; }
   if (camMode && (e.code === 'Enter' || e.code === 'NumpadEnter')) { shoot(); return; }
-  if (camMode && (e.code === 'Equal' || e.code === 'NumpadAdd')) { zoom = clamp(zoom * 1.25, 1, 4); updateZoom(); return; }
-  if (camMode && (e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoom = clamp(zoom / 1.25, 1, 4); updateZoom(); return; }
+  if (e.code === 'Equal' || e.code === 'NumpadAdd') { if (camMode) { zoom = clamp(zoom * 1.25, 1, 4); updateZoom(); } else viewDistance(1 / 1.2); return; }
+  if (e.code === 'Minus' || e.code === 'NumpadSubtract') { if (camMode) { zoom = clamp(zoom / 1.25, 1, 4); updateZoom(); } else viewDistance(1.2); return; }
   if (e.code === 'KeyE') { const c = pick(); if (c) openCard(c); return; }
   keys[e.code] = true;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
