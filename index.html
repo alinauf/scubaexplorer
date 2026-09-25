@@ -37,7 +37,8 @@
   #zone { color: #ffd84a; font-size: 13px; margin-bottom: 8px; }
   dl.stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
   dl.stats dt { color: #8fb8cc; } dl.stats dd { margin: 0; }
-  #buttons { position: absolute; top: 16px; right: 16px; display: flex; gap: 8px; }
+  #buttons { position: absolute; top: 16px; right: 16px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: calc(100% - 290px); }
+  #buttons .btn { padding: 7px 13px; font-size: 14px; }
   #gauge { position: absolute; right: 16px; top: 70px; bottom: 80px; width: 150px; display: flex; flex-direction: column; pointer-events: none; }
   #gauge .seg { flex: 1; border-right: 14px solid; position: relative; display: flex; flex-direction: column; align-items: flex-end; padding: 4px 22px 0 0; font-size: 11px; text-align: right; text-shadow: 0 1px 3px #000; }
   #gauge .seg b { font-weight: 600; } #gauge .seg small { opacity: .6; }
@@ -91,7 +92,43 @@
   #g-detail { overflow-y: auto; border-left: 1px solid rgba(127,224,255,.12); position: relative; }
   #g-detail .btn { width: 100%; padding: 12px; margin: 0 0 14px; }
 
+  #viewfinder { position: absolute; inset: 0; pointer-events: none; }
+  #viewfinder .corner { position: absolute; width: 60px; height: 60px; border: 3px solid rgba(255,255,255,.85); }
+  #viewfinder .tl { left: 8%; top: 12%; border-right: 0; border-bottom: 0; } #viewfinder .tr { right: 8%; top: 12%; border-left: 0; border-bottom: 0; }
+  #viewfinder .bl { left: 8%; bottom: 12%; border-right: 0; border-top: 0; } #viewfinder .br { right: 8%; bottom: 12%; border-left: 0; border-top: 0; }
+  #vf-focus { position: absolute; left: 50%; top: 50%; width: 120px; height: 84px; margin: -42px 0 0 -60px; border: 2px solid rgba(255,255,255,.55); border-radius: 6px; transition: border-color .15s; }
+  #vf-focus.ok { border-color: #ffd84a; } #vf-focus.good { border-color: #4be07a; box-shadow: 0 0 12px rgba(75,224,122,.5); }
+  #vf-focus::after { content: ''; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: rgba(255,255,255,.8); }
+  .vf-bar { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 18px; padding: 6px 16px; border-radius: 999px; background: rgba(0,0,0,.5); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .vf-top { top: calc(12% + 14px); } .vf-low { bottom: calc(12% + 14px); }
+  #vf-subject { font-weight: 600; } #vf-tip { color: #ffd84a; } #vf-rec { color: #ff5a5a; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+
+  #photos { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 8, 16, 0.6); padding: 16px; }
+  .ph-box { width: min(1100px, 100%); height: min(780px, calc(100vh - 32px)); display: flex; flex-direction: column; background: rgba(4, 24, 42, 0.97); overflow: hidden; position: relative; }
+  .ph-box header { display: flex; align-items: center; gap: 14px; padding: 16px 18px 10px; flex-wrap: wrap; }
+  .ph-box h2 { margin: 0; font-size: 22px; }
+  #ph-stats { color: #9fcbe0; font-size: 13px; margin-right: 44px; }
+  #ph-filters { display: flex; gap: 6px; }
+  #ph-filters button { padding: 5px 12px; border-radius: 999px; border: 1px solid #2a6a90; background: transparent; font-size: 13px; }
+  #ph-filters button.on { background: #ffd84a; color: #062033; border-color: #ffd84a; font-weight: 600; }
+  #ph-grid { flex: 1; overflow-y: auto; padding: 8px 18px 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; align-content: start; border-top: 1px solid rgba(127,224,255,.12); }
+  #ph-grid .empty { grid-column: 1 / -1; color: #9fcbe0; text-align: center; margin-top: 60px; }
+  .ph { position: relative; padding: 0; border: 1px solid #1d5a80; border-radius: 10px; overflow: hidden; background: #02101c; text-align: left; transition: border-color .15s, transform .15s; }
+  .ph:hover, .ph:focus-visible { border-color: #ffd84a; transform: translateY(-2px); }
+  .ph img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+  .ph .st { position: absolute; top: 6px; right: 8px; color: #ffd84a; text-shadow: 0 1px 3px #000; font-size: 14px; }
+  .ph .cap { display: flex; flex-direction: column; padding: 8px 10px; } .ph .cap small { color: #8fb8cc; }
+  #pv { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr 320px; background: rgba(2, 14, 26, 0.99); }
+  #pv img { width: 100%; height: 100%; object-fit: contain; background: #000; min-height: 0; }
+  #pv aside { padding: 20px; overflow-y: auto; border-left: 1px solid rgba(127,224,255,.12); display: flex; flex-direction: column; gap: 10px; }
+  #pv h3 { margin: 0; font-size: 20px; } #pv-stars { color: #ffd84a; font-size: 20px; }
+  #pv dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 14px; } #pv dt { color: #7fb6d0; } #pv dd { margin: 0; }
+  #pv-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(255,216,74,.1); border: 1px solid rgba(255,216,74,.3); font-size: 14px; }
+  #pv .row { display: flex; gap: 8px; margin-top: auto; } #pv .row > * { flex: 1; text-align: center; text-decoration: none; }
+
   @media (max-width: 760px) {
+    #pv { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } #pv aside { border-left: 0; }
     #card { right: 16px; left: 16px; top: auto; bottom: 16px; width: auto; max-height: 60vh; }
     #controls { white-space: normal; text-align: center; width: calc(100% - 32px); }
     #gauge { display: none; }
@@ -126,7 +163,9 @@
     </dl>
   </div>
   <div id="buttons">
-    <button id="open-guide" class="btn primary">Fish guide (G)</button>
+    <button id="open-camera" class="btn primary">Camera (F)</button>
+    <button id="open-photos" class="btn">Photos (P)</button>
+    <button id="open-guide" class="btn">Fish guide (G)</button>
     <button id="open-help" class="btn">Controls (H)</button>
     <button id="change-site" class="btn">Change site</button>
   </div>
@@ -134,8 +173,14 @@
   <div id="crosshair"></div>
   <div id="aim" hidden></div>
   <div id="lookhint" hidden>Click the water to look around with the mouse · or drag to look</div>
+  <div id="viewfinder" hidden>
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+    <div id="vf-focus"></div>
+    <div class="vf-bar vf-top"><span id="vf-rec">● CAMERA</span><span id="vf-zoom">1.0×</span><span id="vf-strobe"></span><span id="vf-count"></span></div>
+    <div class="vf-bar vf-low"><span id="vf-subject"></span><span id="vf-tip"></span></div>
+  </div>
   <div id="toasts"></div>
-  <div id="controls" class="glass"><kbd>W A S D</kbd> swim · <kbd>Arrows</kbd>/mouse look · <kbd>Space</kbd>/<kbd>C</kbd> up/down · hold <kbd>Shift</kbd> to dive fast · click a fish to learn about it · <kbd>G</kbd> fish guide</div>
+  <div id="controls" class="glass"><kbd>W A S D</kbd> swim · <kbd>Arrows</kbd>/mouse look · <kbd>Space</kbd>/<kbd>C</kbd> up/down · hold <kbd>Shift</kbd> to dive fast · click a fish to learn about it · <kbd>F</kbd> camera · <kbd>P</kbd> photos · <kbd>G</kbd> fish guide</div>
 </div>
 
 <div id="help" hidden>
@@ -148,6 +193,8 @@
       <li><kbd>Space</kbd> <kbd>C</kbd><span>Rise and sink</span></li>
       <li><kbd>Shift</kbd><span>Dive fast (gets faster the deeper you are)</span></li>
       <li><kbd>Click</kbd> / <kbd>E</kbd><span>Learn about the animal in your crosshair</span></li>
+      <li><kbd>F</kbd><span>Raise or lower your underwater camera. Click or press <kbd>Enter</kbd> to take a photo; scroll or <kbd>+</kbd>/<kbd>−</kbd> to zoom. The strobe fires automatically once it gets dim.</span></li>
+      <li><kbd>P</kbd><span>Photo log: every shot, graded ★–★★★. Subjects stay unidentified until you research them on land.</span></li>
       <li><kbd>G</kbd><span>Fish guide: browse every species and summon any of them</span></li>
       <li><kbd>V</kbd><span>Switch between first- and third-person view</span></li>
     </ul>
@@ -201,6 +248,30 @@
     </div>
   </div>
 </div>
+
+<div id="photos" hidden>
+  <div class="ph-box glass">
+    <header>
+      <h2>Photo log</h2>
+      <nav id="ph-filters"><button data-f="dive">This dive</button><button data-f="all">All dives</button></nav>
+      <span id="ph-stats"></span>
+      <button id="ph-close" class="x" aria-label="Close">×</button>
+    </header>
+    <div id="ph-grid"></div>
+    <div id="pv" hidden>
+      <img id="pv-img" alt="Your underwater photo">
+      <aside>
+        <button id="pv-back" class="btn">← All photos</button>
+        <h3 id="pv-title"></h3>
+        <div id="pv-stars"></div>
+        <dl id="pv-meta"></dl>
+        <p id="pv-note">🔎 You don't know what this is yet. Back on land you'll be able to research your photos and identify each animal.</p>
+        <div class="row"><a id="pv-download" class="btn">Download</a><button id="pv-delete" class="btn">Delete</button></div>
+      </aside>
+    </div>
+  </div>
+</div>
+<div id="flash"></div>
 
 <script src="data.js"></script>
 <script src="game.js"></script>

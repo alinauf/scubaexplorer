@@ -916,7 +916,7 @@ const keys = {};
 const forward = (out = new Vector3()) => out.set(Math.cos(diver.pitch) * Math.cos(diver.yaw), Math.sin(diver.pitch), -Math.cos(diver.pitch) * Math.sin(diver.yaw));
 
 function startDive(s) {
-  site = s;
+  site = s; diveId = Date.now();
   pool = species.filter(sp => !sp.host);
   hosts = species.filter(sp => sp.host);
   cells = new Map(); summoned = [];
@@ -1021,7 +1021,11 @@ function stepCreature(c, dt, dSpeed) {
   else if (mood === 'puff') { const near = dist < 2.2 + dSpeed; c.puff = lerp(c.puff, near ? 1 : 0, Math.min(1, dt * (near ? 5 : 0.6))); }
   else if (mood === 'curious' && dist < 20) {
     if (dSpeed > 4 && dist < 6) c.flee = t + 1;
-    else if (dSpeed < 2.5) { if (dist > 3 + c.size) _des.copy(_to).multiplyScalar(spd * 1.1 / dist); else _des.crossVectors(_to, UP).setLength(spd * 0.6); }
+    else if (dSpeed < 2.5) {   // come closer, but keep a comfortable distance and circle
+      if (dist > 4 + c.size) _des.copy(_to).multiplyScalar(spd * 1.1 / dist);
+      else if (dist < 2.2 + c.size * 0.6) _des.copy(_to).multiplyScalar(-spd / dist);
+      else _des.crossVectors(_to, UP).setLength(spd * 0.6);
+    }
   } else if (mood === 'calm' && dist < c.size * 0.7 + 2) c.flee = t + 0.6;
   // predators hunt
   if (sp.pred && t > c.full && !c.leader) {
@@ -1122,8 +1126,9 @@ function frame(now) {
   const depth = -diver.p.y, amb = ambient(depth), dark = 1 - amb;
   // camera
   const f = forward();
-  diverModel.grp.visible = !firstPerson;
-  if (firstPerson) camera.position.copy(diver.p).addScaledVector(f, 0.35).add(_v.set(0, 0.1, 0));
+  const fp = firstPerson || camMode;
+  diverModel.grp.visible = !fp;
+  if (fp) camera.position.copy(diver.p).addScaledVector(f, 0.35).add(_v.set(0, 0.1, 0));
   else { camera.position.copy(diver.p).addScaledVector(f, -4.2).add(_v.set(0, 1.2, 0)); pushOut(camera.position, 0.3); }
   if (camera.position.y > -0.12) camera.position.y = -0.12;
   camera.lookAt(_v.copy(diver.p).addScaledVector(f, 8).add(_v2.set(0, 0.9, 0)));
@@ -1165,7 +1170,7 @@ function frame(now) {
       _mat.compose(_pos, c.q, _scl); k.mesh.setMatrixAt(i, _mat);
     } k.mesh.instanceColor.setXYZ(i, c.tint.r, c.tint.g, c.tint.b); k.phase.array[i] = c.ph; k.list[i] = c;
     if (c.sp.glow && glowK > 0 && d2 < 3600) {
-      const col = _c.set(c.sp.glow.c).multiplyScalar(glowK * (0.6 + 0.4 * Math.sin(t * 2.5 + c.ph)));
+      const col = _c.set(c.sp.glow.c).multiplyScalar(glowK * (0.6 + 0.4 * Math.sin(t * 2.5 + c.ph)) * Math.min(1, d2 / 9));   // halos fade up close so they don't blind the camera
       const s = c.sp.glow.s, n = s === 'beads' ? 7 : 1;
       for (let q = 0; q < n; q++) {
         _v.set(s === 'lure' ? 0.6 : s === 'tail' ? -0.5 : s === 'red' ? 0.4 : s === 'beads' ? q / 6 - 0.5 : 0, s === 'lure' ? 0.35 : 0, 0).multiplyScalar(c.size).applyQuaternion(c.q).add(c.p);
@@ -1206,7 +1211,14 @@ function frame(now) {
 
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
   if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); }
-  if ((pickT -= dt) < 0) { pickT = 0.12; aimed = pick(); const lab = $('aim'); if (aimed) { lab.textContent = `${aimed.sp.name} · ${aimed.p.distanceTo(diver.p).toFixed(0)} m`; lab.hidden = false; } else lab.hidden = true; }
+  if (camMode && (camT -= dt) < 0) {
+    camT = 0.15; framing = analyzeFrame(ambient(depth) < 0.75); const b = framing.best;
+    $('vf-focus').className = b ? (framing.stars >= 3 ? 'good' : 'ok') : '';
+    $('vf-subject').textContent = b ? `Subject · ${b.dist.toFixed(1)} m · ${'★'.repeat(framing.stars)}${'☆'.repeat(3 - framing.stars)}` : 'No subject';
+    $('vf-tip').textContent = framing.tips[0] || 'Looks great — shoot!';
+    $('vf-strobe').textContent = ambient(depth) < 0.75 ? 'Strobe AUTO' : 'Natural light';
+  }
+  if (!camMode && (pickT -= dt) < 0) { pickT = 0.12; aimed = pick(); const lab = $('aim'); if (aimed) { lab.textContent = `${aimed.sp.name} · ${aimed.p.distanceTo(diver.p).toFixed(0)} m`; lab.hidden = false; } else lab.hidden = true; }
 }
 
 // ---------- picking: what is the crosshair (or mouse) pointing at? ----------
@@ -1346,29 +1358,166 @@ function openGuide() { $('guide').hidden = false; document.exitPointerLock?.(); 
 $('open-guide').onclick = openGuide;
 $('g-close').onclick = () => { $('guide').hidden = true; };
 
+// ---------- underwater camera (part 2) ----------
+// Photos are saved with the subject's species hidden: identifying it is the job of the research you do back on land.
+const photoDB = (() => {
+  let mem = [];
+  const open = new Promise((res, rej) => { try { const r = indexedDB.open('scuba-explorer', 1); r.onupgradeneeded = () => r.result.createObjectStore('photos', { keyPath: 'id' }); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } });
+  const tx = async (mode, fn) => { const db = await open; return new Promise((res, rej) => { const t = db.transaction('photos', mode), q = fn(t.objectStore('photos')); t.oncomplete = () => res(q.result); t.onerror = () => rej(t.error); }); };
+  return {   // falls back to memory (lost on reload) if the browser blocks IndexedDB
+    all: () => tx('readonly', s => s.getAll()).catch(() => mem),
+    put: p => tx('readwrite', s => s.put(p)).catch(() => { mem.push(p); }),
+    del: id => tx('readwrite', s => s.delete(id)).catch(() => { mem = mem.filter(p => p.id !== id); }),
+  };
+})();
+let photos = [], camMode = false, zoom = 1, diveId = 0, lastShot = -9, framing = null, camT = 0;
+photoDB.all().then(list => { photos = list.sort((a, b) => a.time - b.time); updateShotCount(); });
+const strobe = new THREE.PointLight(0xffffff, 0, 14, 1.2); scene.add(strobe);
+const kindName = sp => (sp.kind || (CORAL.has(sp.type) ? 'coral' : KIND[sp.type])).toLowerCase();
+
+function setCamMode(on) {
+  camMode = on; $('viewfinder').hidden = !on; $('crosshair').hidden = on; $('aim').hidden = true; $('controls').hidden = on; $('gauge').hidden = on;
+  if (!on) { zoom = 1; camera.fov = 70; camera.updateProjectionMatrix(); }
+  updateZoom();
+}
+function updateZoom() { camera.fov = 70 / zoom; camera.updateProjectionMatrix(); $('vf-zoom').textContent = `${zoom.toFixed(1)}×`; }
+function updateShotCount() { $('vf-count').textContent = `${photos.length} photo${photos.length === 1 ? '' : 's'}`; $('open-photos').textContent = `Photos (P) · ${photos.length}`; }
+
+// Who is in the frame, how big, how centred, how well lit — this is also what grades the photo.
+function analyzeFrame(withStrobe) {
+  const tanH = Math.tan(camera.fov * Math.PI / 360), cam = camera.position, fogD = scene.fog.density, out = [];
+  const torchK = clamp((1 - ambient(-diver.p.y) - 0.35) / 0.4, 0, 1);
+  for (const c of live) {
+    const dist = c.p.distanceTo(cam); if (dist > 45 || dist < 0.15) continue;
+    _v.copy(c.p).project(camera); if (_v.z > 1 || Math.abs(_v.x) > 1 || Math.abs(_v.y) > 1) continue;
+    const frac = c.size * 0.5 / (dist * tanH); if (frac < 0.02) continue;
+    const light = Math.max(ambient(-c.p.y), withStrobe ? clamp(1.1 - dist / 9, 0, 1) : 0, torchK * clamp(1 - dist / 22, 0, 0.8), c.sp.glow ? 0.45 : 0) * Math.exp(-((fogD * dist) ** 2));
+    out.push({ c, dist, frac, center: Math.hypot(_v.x, _v.y * camera.aspect), light, score: Math.min(frac, 0.45) * (1.25 - Math.min(1, Math.hypot(_v.x, _v.y))) * (0.2 + light) });
+  }
+  out.sort((a, b) => b.score - a.score);
+  let best = null;
+  for (const o of out.slice(0, 5)) {   // the subject must not be hidden behind rock
+    ray.set(cam, _v2.subVectors(o.c.p, cam).normalize()); ray.far = o.dist;
+    if (!ray.intersectObjects([...tiles.values()], false).length) { best = o; break; }
+  }
+  const blur = diver.v.length() > 1.3 || (best && best.c.v.length() > 1.5 * Math.max(1, best.c.size * 2) && !camMode) || (best && best.c.v.length() * zoom > 3);
+  let stars = 0; const tips = [];
+  if (best) {
+    stars = 1;
+    const framed = best.frac >= 0.12 && best.center < 0.5, lit = best.light >= 0.35;
+    if (framed) stars++; if (framed && lit && !blur && best.frac >= 0.18) stars++;
+    if (best.frac < 0.12) tips.push(zoom < 4 ? 'Get closer or zoom in' : 'Get closer');
+    else if (best.frac < 0.18) tips.push('Fill more of the frame');
+    if (best.center >= 0.5) tips.push('Centre your subject');
+    if (!lit) tips.push(ambient(-best.c.p.y) < 0.3 ? 'Too dark — get within a few metres so the strobe reaches' : 'Subject is lost in the haze — get closer');
+    if (blur) tips.push('Motion blur — hold still while you shoot');
+  } else tips.push('No animal in frame');
+  const others = [...new Set(out.filter(o => o !== best && o.frac > 0.03 && o.light > 0.15).map(o => o.c.sp.id))].filter(id => id !== best?.c.sp.id);
+  return { best, stars, tips, others };
+}
+
+let actx = null;
+function shutterSound() {
+  try {
+    actx = actx || new AudioContext();
+    const n = actx.sampleRate * 0.14 | 0, buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) { const u = i / n; d[i] = (Math.random() * 2 - 1) * Math.pow(1 - u, 3) * (u < 0.12 || (u > 0.5 && u < 0.62) ? 1 : 0.15); }
+    const src = actx.createBufferSource(), g = actx.createGain(); g.gain.value = 0.35; src.buffer = buf; src.connect(g).connect(actx.destination); src.start();
+  } catch { /* audio is optional */ }
+}
+
+async function shoot() {
+  if (t - lastShot < 0.6) return; lastShot = t;
+  const useStrobe = ambient(-diver.p.y) < 0.75;   // auto strobe: on everywhere but the bright shallows
+  if (useStrobe) { strobe.position.copy(camera.position).addScaledVector(forward(), 0.3); strobe.intensity = 160; }
+  const shot = analyzeFrame(useStrobe);
+  renderer.render(scene, camera);
+  const src = renderer.domElement, W = 960, H = 540, cv = makeCanvas(W, H), g = cv.getContext('2d');
+  let cw = src.width, ch = cw * H / W; if (ch > src.height) { ch = src.height; cw = ch * W / H; }
+  g.drawImage(src, (src.width - cw) / 2, (src.height - ch) / 2, cw, ch, 0, 0, W, H);
+  const vg = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.62); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.45)'); g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  strobe.intensity = 0;
+  const flash = $('flash'); flash.style.transition = 'none'; flash.style.opacity = useStrobe ? '0.85' : '0.35'; requestAnimationFrame(() => { flash.style.transition = 'opacity .45s ease-out'; flash.style.opacity = '0'; });
+  shutterSound();
+  if (useStrobe) for (const c of mobile) if (c.p.distanceTo(diver.p) < 9 && !['shark', 'whale', 'turtle'].includes(c.sp.type) && c.sp.mood !== 'curious') { c.flee = t + 1.5; c.fleeFrom = null; }
+  const b = shot.best;
+  const photo = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, time: Date.now(), dive: diveId, site: site.name, area: site.area, depth: Math.round(-diver.p.y),
+    img: cv.toDataURL('image/jpeg', 0.85), stars: shot.stars, tips: shot.tips, strobe: useStrobe, zoom: +zoom.toFixed(1),
+    subject: b ? { id: b.c.sp.id, kind: kindName(b.c.sp), dist: +b.dist.toFixed(1), depth: Math.round(-b.c.p.y) } : null, others: shot.others, researched: false };
+  photos.push(photo); updateShotCount(); photoDB.put(photo);
+  const st = '★'.repeat(shot.stars) + '☆'.repeat(3 - shot.stars);
+  toast(b ? `📷 ${st} Unidentified ${photo.subject.kind} at ${photo.depth} m${shot.tips.length ? ' — ' + shot.tips[0] : ''}` : `📷 ${shot.tips[0]}`);
+}
+
+// ---------- photo log ----------
+let logFilter = 'dive', viewing = null;
+const fmtTime = ms => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+function renderPhotos() {
+  const list = photos.filter(p => logFilter === 'all' || p.dive === diveId).slice().reverse();
+  const subjects = new Set(list.filter(p => p.subject).map(p => p.subject.id)).size;
+  $('ph-stats').textContent = list.length ? `${list.length} photo${list.length > 1 ? 's' : ''} · ${subjects} different subject${subjects === 1 ? '' : 's'} · best ${'★'.repeat(Math.max(...list.map(p => p.stars)))}` : '';
+  for (const b of $('ph-filters').children) b.classList.toggle('on', b.dataset.f === logFilter);
+  $('ph-grid').innerHTML = list.length ? '' : `<p class="empty">No photos yet${logFilter === 'dive' ? ' on this dive' : ''}. Press <kbd>F</kbd> to raise your camera, then click to shoot.</p>`;
+  for (const p of list) {
+    const el = document.createElement('button'); el.className = 'ph';
+    el.innerHTML = `<img alt=""><span class="st"></span><span class="cap"><b></b><small></small></span>`;
+    el.querySelector('img').src = p.img; el.querySelector('.st').textContent = '★'.repeat(p.stars) + '☆'.repeat(3 - p.stars);
+    el.querySelector('b').textContent = p.subject ? `Unidentified ${p.subject.kind}` : 'No subject';
+    el.querySelector('small').textContent = `${p.depth} m · ${p.site}`;
+    el.onclick = () => showPhoto(p); $('ph-grid').appendChild(el);
+  }
+}
+function showPhoto(p) {
+  viewing = p; $('pv').hidden = false;
+  $('pv-img').src = p.img;
+  $('pv-title').textContent = p.subject ? `Unidentified ${p.subject.kind}` : 'No subject in frame';
+  $('pv-stars').textContent = '★'.repeat(p.stars) + '☆'.repeat(3 - p.stars);
+  $('pv-meta').innerHTML = '';
+  const rows = [['Where', `${p.site} · ${p.area}`], ['Depth', `${p.depth} m`], ['Taken', fmtTime(p.time)],
+    ['Subject', p.subject ? `${p.subject.dist} m away at ${p.subject.depth} m depth` : '—'], ['Also in frame', p.others.length ? `${p.others.length} other kind${p.others.length > 1 ? 's' : ''} of animal` : 'nothing else'],
+    ['Camera', `${p.zoom}× zoom${p.strobe ? ' · strobe' : ''}`], ['Tips', p.tips.length ? p.tips.join(' · ') : 'Great shot!']];
+  for (const [k, v] of rows) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = k; dd.textContent = v; $('pv-meta').append(dt, dd); }
+  $('pv-note').hidden = !p.subject;
+  $('pv-download').href = p.img; $('pv-download').download = `scuba-${p.site.replace(/\W+/g, '-').toLowerCase()}-${p.depth}m-${p.id.slice(0, 13)}.jpg`;
+}
+function openPhotos() { $('photos').hidden = false; $('pv').hidden = true; document.exitPointerLock?.(); renderPhotos(); }
+$('open-photos').onclick = openPhotos; $('open-camera').onclick = () => setCamMode(!camMode);
+$('ph-close').onclick = () => { $('photos').hidden = true; };
+$('ph-filters').onclick = e => { const f = e.target.dataset?.f; if (f) { logFilter = f; renderPhotos(); } };
+$('pv-back').onclick = () => { $('pv').hidden = true; };
+$('pv-delete').onclick = async () => { if (!viewing || !confirm('Delete this photo?')) return; photos = photos.filter(p => p !== viewing); await photoDB.del(viewing.id); updateShotCount(); $('pv').hidden = true; renderPhotos(); };
+canvas.addEventListener('wheel', e => { if (!camMode) return; e.preventDefault(); zoom = clamp(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 1, 4); updateZoom(); }, { passive: false });
+
 // ---------- input ----------
-const uiOpen = () => !$('guide').hidden || !$('help').hidden || !$('picker').hidden;
+const uiOpen = () => !$('guide').hidden || !$('help').hidden || !$('picker').hidden || !$('photos').hidden;
 let locked = false, lockFailed = false, drag = null;
 document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; $('lookhint').hidden = locked || !site; if (locked) mouseNDC = null; });
 document.addEventListener('pointerlockerror', () => { lockFailed = true; });
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') { if (e.code === 'Escape') $('guide').hidden = true; return; }
-  if (e.code === 'Escape') { $('guide').hidden = true; $('help').hidden = true; closeCard(); return; }
+  if (e.code === 'Escape') { if (!$('pv').hidden) $('pv').hidden = true; else if (!$('photos').hidden) $('photos').hidden = true; else if (camMode) setCamMode(false); $('guide').hidden = true; $('help').hidden = true; closeCard(); return; }
   if (!site) return;
   if (e.code === 'KeyG') { e.preventDefault(); $('guide').hidden ? openGuide() : ($('guide').hidden = true); return; }
   if (e.code === 'KeyH') { $('help').hidden = !$('help').hidden; return; }
   if (e.code === 'KeyV') { firstPerson = !firstPerson; return; }
+  if (e.code === 'KeyP') { $('photos').hidden ? openPhotos() : ($('photos').hidden = true); return; }
+  if (uiOpen()) return;
+  if (e.code === 'KeyF') { setCamMode(!camMode); return; }
+  if (camMode && (e.code === 'Enter' || e.code === 'NumpadEnter')) { shoot(); return; }
+  if (camMode && (e.code === 'Equal' || e.code === 'NumpadAdd')) { zoom = clamp(zoom * 1.25, 1, 4); updateZoom(); return; }
+  if (camMode && (e.code === 'Minus' || e.code === 'NumpadSubtract')) { zoom = clamp(zoom / 1.25, 1, 4); updateZoom(); return; }
   if (e.code === 'KeyE') { const c = pick(); if (c) openCard(c); return; }
   keys[e.code] = true;
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
-const look = (dx, dy) => { diver.yaw -= dx * 0.0025; diver.pitch = clamp(diver.pitch - dy * 0.0025, -1.45, 1.45); };
+const look = (dx, dy) => { const k = 0.0025 / (camMode ? zoom : 1); diver.yaw -= dx * k; diver.pitch = clamp(diver.pitch - dy * k, -1.45, 1.45); };
 canvas.addEventListener('mousedown', e => { drag = { moved: 0 }; });
 addEventListener('mouseup', () => {
   if (!drag) return; const wasClick = drag.moved < 5; drag = null;
   if (!wasClick || !site || uiOpen()) return;
+  if (camMode) { shoot(); return; }
   const c = pick(); if (c) { openCard(c); return; }
   if (!locked && !lockFailed && $('card').hidden) { try { canvas.requestPointerLock?.()?.catch?.(() => { lockFailed = true; }); } catch { lockFailed = true; } }
 });
@@ -1379,7 +1528,7 @@ addEventListener('mousemove', e => {
 });
 $('help-close').onclick = () => { $('help').hidden = true; };
 $('open-help').onclick = () => { $('help').hidden = false; };
-$('change-site').onclick = () => { site = null; $('hud').hidden = true; closeCard(); $('guide').hidden = true; $('picker').hidden = false; document.exitPointerLock?.(); };
+$('change-site').onclick = () => { setCamMode(false); site = null; $('hud').hidden = true; closeCard(); $('guide').hidden = true; $('picker').hidden = false; document.exitPointerLock?.(); };
 
 // ---------- site picker ----------
 for (const s of sites) {
