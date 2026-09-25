@@ -97,13 +97,17 @@ scene.add(hemi, sun, sun.target, torch, torch.target, diverLamp);
 // ---------- geometry helpers ----------
 const _e = new Euler(), _q = new Quaternion(), _v = new Vector3(), _v2 = new Vector3();
 function M(x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx) { _e.set(rx, ry, rz, 'XYZ'); return new Matrix4().compose(new Vector3(x, y, z), new Quaternion().setFromEuler(_e), new Vector3(sx, sy, sz)); }
-const patchUV = i => [252 / 256, 1 - (i * 8 + 4) / 128];  // 0 white 1 black 2 fin 3 tail 4 belly 5 accent 6 main 7 glow
+const patchUV = i => [504 / 512, 1 - (i * 16 + 8) / 320];  // 0 white 1 black 2 fin 3 tail 4 belly 5 accent 6 main 7 glow 8 iris
+const BODY_UV = (u, v) => [u * 0.96, 0.2 + 0.8 * v];         // body texels sit above the fin bands
 function part(g, { patch = null, m = null, w = 0, wFn = null, uvFn = null } = {}) {
+  const flatFin = (patch === 2 || patch === 3) && g.type === 'ShapeGeometry';
   g = g.index ? g.toNonIndexed() : g;
+  if (flatFin) finUV(g, patch === 3);
+  else if (patch === null && !uvFn && g.attributes.uv) { const u = g.attributes.uv; for (let i = 0; i < u.count; i++) u.setXY(i, ...BODY_UV(u.getX(i), u.getY(i))); }
   if (m) g.applyMatrix4(m);
   if (!g.attributes.normal) g.computeVertexNormals();
   const pos = g.attributes.position, n = pos.count;
-  if (patch !== null || uvFn || !g.attributes.uv) {
+  if (!flatFin && (patch !== null || uvFn || !g.attributes.uv)) {
     const a = new Float32Array(n * 2), [pu, pv] = patchUV(patch ?? 6);
     for (let i = 0; i < n; i++) { if (uvFn) { const [u, v] = uvFn(pos.getX(i), pos.getY(i), pos.getZ(i)); a[i * 2] = u; a[i * 2 + 1] = v; } else { a[i * 2] = pu; a[i * 2 + 1] = pv; } }
     g.setAttribute('uv', new THREE.BufferAttribute(a, 2));
@@ -111,6 +115,20 @@ function part(g, { patch = null, m = null, w = 0, wFn = null, uvFn = null } = {}
   const aw = new Float32Array(n); for (let i = 0; i < n; i++) aw[i] = wFn ? wFn(pos.getX(i), pos.getY(i), pos.getZ(i)) : w;
   g.setAttribute('aW', new THREE.BufferAttribute(aw, 1));
   return g;
+}
+// fins map onto a band of ray texture: rays run from the base (nearest the body axis, or the tail root) out to the edge
+function finUV(g, tail) {
+  const p = g.attributes.position, n = p.count, a = new Float32Array(n * 2);
+  let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, r0 = 1e9, r1 = -1e9;
+  for (let i = 0; i < n; i++) { const x = p.getX(i), y = p.getY(i); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); r0 = Math.min(r0, Math.abs(y)); r1 = Math.max(r1, Math.abs(y)); }
+  const [top, bot] = tail ? [0.098, 0.004] : [0.198, 0.104];
+  for (let i = 0; i < n; i++) {
+    const x = p.getX(i), y = p.getY(i);
+    const along = tail ? (x1 - x) / Math.max(1e-6, x1 - x0) : (Math.abs(y) - r0) / Math.max(1e-6, r1 - r0);
+    const across = tail ? (y - y0) / Math.max(1e-6, y1 - y0) : (x - x0) / Math.max(1e-6, x1 - x0);
+    a[i * 2] = across * 0.96; a[i * 2 + 1] = top - along * (top - bot);
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(a, 2));
 }
 function merge(parts) {
   let n = 0; for (const p of parts) n += p.attributes.position.count;
@@ -127,7 +145,7 @@ function loft(n, m, fx, fh, fw, fy = () => 0) {
   const pos = [], uv = [], idx = [];
   for (let i = 0; i <= n; i++) {
     const t = i / n, x = fx(t), h = fh(t), w = fw(t), y0 = fy(t);
-    for (let j = 0; j <= m; j++) { const th = j / m * Math.PI * 2; pos.push(x, y0 + Math.cos(th) * h, Math.sin(th) * w); uv.push(t * 0.96, j / m); }
+    for (let j = 0; j <= m; j++) { const th = j / m * Math.PI * 2; pos.push(x, y0 + Math.cos(th) * h, Math.sin(th) * w); uv.push(t, j / m); }
   }
   for (let i = 0; i < n; i++) for (let j = 0; j < m; j++) { const a = i * (m + 1) + j, b = a + m + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
   const g = new THREE.BufferGeometry();
@@ -143,8 +161,8 @@ function limb(from, dir, len, r0, r1, patch, seg = 5) { // tapered cylinder from
 }
 function eyes(P, x, y, z, r, white = true) {
   for (const s of [-1, 1]) {
-    if (white) P.push(part(sphere(8), { patch: 0, m: M(x, y, s * z, 0, 0, 0, r) }));
-    P.push(part(sphere(8), { patch: 1, m: M(x + r * 0.25, y, s * (z + r * (white ? 0.55 : 0.1)), 0, 0, 0, r * (white ? 0.6 : 1)) }));
+    if (white) P.push(part(sphere(12), { patch: 8, m: M(x, y, s * z * 0.9, 0, 0, 0, r, r, r * 0.55) }));        // iris, set flush into the head
+    P.push(part(sphere(10), { patch: 1, m: M(x + r * 0.1, y, s * (z * (white ? 0.9 : 1) + r * (white ? 0.3 : 0.1)), 0, 0, 0, r * (white ? 0.6 : 1), r * (white ? 0.6 : 1), r * (white ? 0.35 : 1)) }));
   }
 }
 function pectorals(P, x, y, z, len, patch, down = 0.35) {
@@ -164,13 +182,20 @@ const BUILD = {
   fish(sp) {
     const f = sp.f || {}, H = f.h || 0.4, P = [], rat = !!f.rattail, x1 = rat ? -0.5 : -0.3;
     const wr = f.w || (H > 0.55 ? 0.32 : H < 0.22 ? 0.75 : 0.5);
-    const prof = t => t < 0.3 ? Math.pow(Math.sin(t / 0.3 * Math.PI / 2), 0.6) : 1 - (1 - (rat ? 0.03 : 0.15)) * Math.pow((t - 0.3) / 0.7, rat ? 0.9 : 1.5);
+    const prof = t => t < 0.33 ? Math.pow(Math.sin(t / 0.33 * Math.PI / 2), 0.85) : 1 - (1 - (rat ? 0.03 : 0.15)) * Math.pow((t - 0.33) / 0.67, rat ? 0.9 : 1.5);
     const hump = t => f.hump ? f.hump * 0.1 * H * Math.exp(-(((t - 0.1) / 0.1) ** 2)) : 0;
     const fh = t => H / 2 * prof(t) + hump(t) / 2, fy = t => hump(t) / 2, fw = t => Math.max(0.003, H / 2 * prof(t) * wr * (f.box ? 1.6 : 1));
     const tOf = x => clamp((0.5 - x) / (0.5 - x1), 0, 1), top = x => fy(tOf(x)) + fh(tOf(x)), bot = x => fy(tOf(x)) - fh(tOf(x));
-    P.push(part(loft(22, 16, t => 0.5 - t * (0.5 - x1), fh, fw, fy)));
+    P.push(part(loft(32, 22, t => 0.5 - t * (0.5 - x1), fh, fw, fy)));
+    if (!f.lobed && !f.tripod) for (const s of [-1, 1]) P.push(part(shape([0.03, 0, -0.1, 0, -0.08, -Math.max(0.05, H * 0.28)]), { patch: 2, m: M(0.1, bot(0.1) * 0.85, s * fw(tOf(0.1)) * 0.35, s * 0.35, 0, 0) }));
     if (!rat) P.push(part(tailShape(f.tail || 'fork', Math.max(0.09, H * 0.55)), { patch: 3 }));
     const d = f.dorsal;
+    const contourFin = (xa, xb, hmax, below, peak = 0.6) => {   // fin whose base follows the body outline
+      const pts = [], N = 12;
+      for (let i = 0; i <= N; i++) { const x = lerp(xa, xb, i / N); pts.push(x, below ? bot(x) * 0.9 : top(x) * 0.9); }
+      for (let i = N; i >= 0; i--) { const u = i / N, x = lerp(xa, xb, u) - hmax * 0.25 * u, k = Math.pow(u < peak ? Math.sin(u / peak * Math.PI / 2) : Math.cos((u - peak) / (1 - peak) * Math.PI / 2), 0.7); pts.push(x, below ? bot(x) - hmax * k : top(x) + hmax * k); }
+      return part(shape(pts), { patch: 2 });
+    };
     if (d === 'spiky') {
       for (let i = 0; i < 9; i++) { const x = 0.25 - i * 0.055; P.push(part(shape([x + 0.012, top(x) * 0.9, x - 0.012, top(x) * 0.9, x - 0.03, top(x) + H * 1.2]), { patch: i % 2 ? 4 : 5 })); }
       const fan = () => shape([0, 0, -0.32, 0.2, -0.42, 0.02, -0.34, -0.16]);
@@ -180,8 +205,11 @@ const BUILD = {
     else if (d === 'long') P.push(part(shape([0.36, top(0.36) * 0.9, 0.3, top(0.3) + H * 0.3, -0.26, top(-0.26) + H * 0.15, -0.28, top(-0.28) * 0.8]), { patch: 2 }));
     else if (d === 'streamer') P.push(part(shape([0.12, top(0.12) * 0.9, 0.02, top(0.02) * 0.9, -0.6, top(0) + H * 1.1]), { patch: 0 }), part(shape([0.12, bot(0.12) * 0.9, -0.2, bot(-0.2) * 0.8, -0.1, bot(0) - H * 0.5]), { patch: 5 }));
     else if (d === 'bat') P.push(part(shape([0.2, top(0.2) * 0.9, -0.26, top(-0.26) * 0.8, -0.2, top(0) + H * 0.9]), { patch: 2 }), part(shape([0.1, bot(0.1) * 0.9, -0.26, bot(-0.26) * 0.8, -0.2, bot(0) - H * 0.9]), { patch: 2 }));
-    else if (!rat || f.blob) P.push(part(shape([0.12, top(0.12) * 0.9, -0.16, top(-0.16) * 0.85, -0.06, top(0) + H * (H > 0.6 ? 0.3 : 0.42)]), { patch: 2 }));
-    if (H > 0.5 && !d) P.push(part(shape([0.04, bot(0.04) * 0.9, -0.22, bot(-0.22) * 0.85, -0.12, bot(0) - H * 0.3]), { patch: 2 }));
+    else if (!rat || f.blob) {
+      if (H >= 0.33) P.push(contourFin(0.22, -0.27, H * (H > 0.6 ? 0.28 : 0.34), false, 0.7));               // reef fish: long spiny + soft dorsal
+      else P.push(contourFin(0.14, -0.04, H * 0.55, false, 0.35), contourFin(-0.12, -0.24, H * 0.3, false, 0.4)); // streamlined: two dorsals
+    }
+    if (!rat && !['bat', 'streamer', 'spiky'].includes(d)) P.push(contourFin(H >= 0.33 ? 0.02 : -0.1, -0.26, H * (H > 0.6 ? 0.26 : H >= 0.33 ? 0.22 : 0.3), true, 0.55));
     if (d !== 'spiky') pectorals(P, 0.2, bot(0.2) * 0.35, fw(tOf(0.2)) * 0.9, Math.max(0.5, H * 1.4), 2, 0.9);
     const ex = rat ? 0.4 : 0.36, et = tOf(ex), er = Math.max(0.013, H * 0.075) * (f.eyeBig ? 1.6 : 1);
     if (f.dome) for (const s of [-1, 1]) P.push(part(new THREE.CylinderGeometry(0.018, 0.018, 0.06, 8), { patch: 5, m: M(0.36, top(0.36), s * 0.018) }));
@@ -200,7 +228,7 @@ const BUILD = {
     const wr = f.wobbe ? 2.4 : f.whale || f.mega ? 1.15 : 0.85;
     const prof = t => t < 0.33 ? Math.pow(Math.sin(t / 0.33 * Math.PI / 2), f.hammer || f.whale || f.wobbe ? 0.35 : 0.6) : 1 - 0.88 * Math.pow((t - 0.33) / 0.67, 1.3);
     const fh = t => H / 2 * prof(t), fw = t => H / 2 * prof(t) * wr * (f.whale && t < 0.3 ? 1.2 : 1), tOf = x => clamp((0.5 - x) / (0.5 - x1), 0, 1);
-    P.push(part(loft(22, 16, t => 0.5 - t * (0.5 - x1), fh, fw)));
+    P.push(part(loft(32, 20, t => 0.5 - t * (0.5 - x1), fh, fw)));
     if (f.thresher) P.push(part(shape([x1 + 0.02, H * 0.05, -0.52, H * 0.4, -0.48, H * 0.2, x1 - 0.05, -H * 0.1, x1 - 0.02, -H * 0.55, x1 + 0.02, -H * 0.05]), { patch: 3 }));
     else if (f.zebra) P.push(part(shape([x1 + 0.02, H * 0.35, -0.5, 0.01, x1 + 0.02, -H * 0.25]), { patch: 3 }));
     else P.push(part(shape([x1 + 0.02, 0.012, -0.5, H * (f.wobbe ? 0.4 : 1.35), -0.42, 0, -0.44, -H * (f.wobbe ? 0.2 : 0.7), x1 + 0.02, -0.012]), { patch: 3 }));
@@ -466,7 +494,7 @@ const BUILD = {
   bamboo(sp) { return { P: tree(sp, 2, 0.45, 0.02, 5, 5, true), mode: 6, amp: 0.02 }; },
   fan() {
     const s = new THREE.Shape(); s.moveTo(0, 0); for (let i = 0; i <= 16; i++) { const a = 0.25 + i / 16 * (Math.PI - 0.5); s.lineTo(Math.cos(a) * 0.55, Math.sin(a) * 0.55 + 0.1); } s.lineTo(0, 0);
-    return { P: [part(new THREE.ShapeGeometry(s), { uvFn: (x, y) => [clamp(x + 0.5, 0, 0.94), clamp(y / 0.66, 0, 1)] }), part(new THREE.CylinderGeometry(0.015, 0.02, 0.12, 5), { patch: 6, m: M(0, 0.06, 0) })], mode: 6, amp: 0.06, alphaTest: 0.5 };
+    return { P: [part(new THREE.ShapeGeometry(s), { uvFn: (x, y) => BODY_UV(clamp(x + 0.5, 0, 0.98), clamp(y / 0.66, 0, 1)) }), part(new THREE.CylinderGeometry(0.015, 0.02, 0.12, 5), { patch: 6, m: M(0, 0.06, 0) })], mode: 6, amp: 0.06, alphaTest: 0.5 };
   },
   anemone(sp) {
     const P = [part(new THREE.CylinderGeometry(0.3, 0.35, 0.12, 14), { patch: 6, m: M(0, 0.06, 0) })], R = rng(5);
@@ -512,7 +540,8 @@ function tree(sp, levels, len, r, kids, seed, bamboo = false) {
 // ---------- textures ----------
 function makeCanvas(w = 256, h = 128) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 function makeTex(sp) {
-  const cv = makeCanvas(), g = cv.getContext('2d'), f = sp.f || {}, [c0, c1, c2 = c1] = sp.c, W = 246, R = rng(hash(sp.id));
+  const cv = makeCanvas(512, 320), g = cv.getContext('2d'), f = sp.f || {}, [c0, c1, c2 = c1] = sp.c, W = 246, R = rng(hash(sp.id));
+  g.save(); g.scale(2, 2);   // body is drawn in 256×128 units
   const belly = ['shark', 'ray', 'whale'].includes(sp.type) ? c1 : f.pattern === 'bands' ? c0 : lighter(c0);
   const dot = (x, y, r, col) => { g.fillStyle = col; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); };
   const both = fn => { fn(1); fn(-1); }; // draw on both flanks: row = 64 ± s * k
@@ -575,14 +604,26 @@ function makeTex(sp) {
   if (['table', 'mushroom', 'sponge', 'xeno', 'glass'].includes(sp.type)) { g.strokeStyle = c1; g.globalAlpha = sp.type === 'glass' ? 1 : 0.35; g.lineWidth = 1; for (let x = 0; x < W; x += 8) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 128); g.stroke(); } if (sp.type !== 'sponge') for (let y = 0; y < 128; y += 8) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); } g.globalAlpha = 1; }
   if (sp.type === 'fan') { g.strokeStyle = c0; g.lineWidth = 2.2; for (let i = 0; i < 26; i++) { g.beginPath(); g.moveTo(128, 128); g.lineTo(i / 25 * 240, 0); g.stroke(); } g.strokeStyle = c1; g.lineWidth = 1.6; for (let r = 14; r < 150; r += 13) { g.beginPath(); g.arc(128, 128, r, Math.PI, Math.PI * 2); g.stroke(); } }
   if (sp.type === 'clam') { g.fillStyle = c0; g.fillRect(0, 0, 248, 128); for (let i = 0; i < 70; i++) dot(R() * W, R() * 128, 3, c1); }
+  if (sp.type === 'fish' && f.pattern !== 'bands') {   // gill cover and lateral line
+    g.strokeStyle = 'rgba(0,0,0,0.16)'; g.lineWidth = 1; for (const [a, b] of [[16, 56], [72, 112]]) { g.beginPath(); g.moveTo(50, a); g.quadraticCurveTo(62, (a + b) / 2, 50, b); g.stroke(); }
+    g.strokeStyle = 'rgba(255,255,255,0.22)'; g.lineWidth = 0.8; for (const y of [30, 98]) { g.beginPath(); g.moveTo(62, y); g.quadraticCurveTo(140, y + (y < 64 ? -6 : 6), 236, 64 + (y - 64) * 0.4); g.stroke(); }
+  }
   // colour patches for eyes, fins, etc.
-  const fin = f.finc || (sp.type === 'fish' && sp.c[2] ? mix(c0, c2, 0.4) : c0);
-  ['#f4f4f0', '#0a0a0a', fin, f.tailc || fin, belly, c2, c0, '#ffffff'].forEach((col, i) => { g.fillStyle = col; g.fillRect(248, i * 8, 8, 8); });
-  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4; return tex;
+  const fin = f.finc || (sp.type === 'fish' && sp.c[2] ? mix(c0, c2, 0.4) : c0), tailc = f.tailc || fin;
+  const iris = sp.type === 'shark' ? '#1a1a1a' : mix(mix(c0, '#c8a860', 0.6), '#000000', 0.15);
+  ['#f4f4f0', '#0a0a0a', fin, tailc, belly, c2, c0, '#ffffff', iris].forEach((col, i) => { g.fillStyle = col; g.fillRect(248, i * 8, 8, 8); });
+  g.restore();
+  // fin (rows 256–287) and tail (288–319) bands: base colour, fin rays on bony fish, a paler, thinner edge
+  [[256, fin], [288, tailc]].forEach(([y0, col]) => {
+    const gr = g.createLinearGradient(0, y0, 0, y0 + 32); gr.addColorStop(0, mix(col, '#000000', 0.1)); gr.addColorStop(0.75, col); gr.addColorStop(1, mix(col, '#ffffff', 0.35));
+    g.fillStyle = gr; g.fillRect(0, y0, 512, 32);
+    if (sp.type === 'fish') { g.strokeStyle = mix(col, '#000000', 0.35); g.globalAlpha = 0.55; g.lineWidth = 1.5; for (let x = 4; x < 512; x += 11) { g.beginPath(); g.moveTo(x, y0); g.lineTo(x + (x - 256) * 0.02, y0 + 32); g.stroke(); } g.globalAlpha = 1; }
+  });
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; return tex;
 }
 function makeGlowTex(sp) {
-  const cv = makeCanvas(), g = cv.getContext('2d'), s = sp.glow.s;
-  g.fillStyle = '#000'; g.fillRect(0, 0, 256, 128); g.fillStyle = '#fff';
+  const cv = makeCanvas(512, 320), g = cv.getContext('2d'), s = sp.glow.s;
+  g.fillStyle = '#000'; g.fillRect(0, 0, 512, 320); g.scale(2, 2); g.fillStyle = '#fff';
   if (s === 'belly') for (let x = 30; x < 200; x += 14) for (const y of [58, 70]) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); }
   if (s === 'red') { g.fillRect(20, 36, 16, 12); g.fillRect(20, 80, 16, 12); }
   if (s === 'body') { g.globalAlpha = 0.7; g.fillRect(0, 0, 248, 128); g.globalAlpha = 1; }
@@ -591,6 +632,19 @@ function makeGlowTex(sp) {
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; return tex;
 }
 
+// relief (bump) maps: overlapping scales for bony fish, fine denticles for sharks & rays; patches stay flat
+const BUMP = {};
+function bumpFor(kind) {
+  if (BUMP[kind]) return BUMP[kind];
+  const cv = makeCanvas(512, 320), g = cv.getContext('2d'), R = rng(kind.length * 99);
+  g.fillStyle = '#808080'; g.fillRect(0, 0, 512, 320);
+  if (kind === 'scales') { g.lineWidth = 1.4; for (let y = 0; y < 256; y += 7) for (let x = (y / 7 % 2) * 5; x < 492; x += 10) { g.strokeStyle = '#a8a8a8'; g.beginPath(); g.arc(x, y, 6, 0.2, Math.PI - 0.2); g.stroke(); g.strokeStyle = '#606060'; g.beginPath(); g.arc(x, y + 1.5, 6, 0.3, Math.PI - 0.3); g.stroke(); } }
+  else for (let i = 0; i < 20000; i++) { const v = 110 + R() * 40 | 0; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(R() * 492, R() * 256, 1.2, 1.2); }
+  g.strokeStyle = '#a0a0a0'; g.lineWidth = 1.2; for (let x = 4; x < 512; x += 11) { g.beginPath(); g.moveTo(x, 256); g.lineTo(x, 320); g.stroke(); }
+  g.fillStyle = '#808080'; g.fillRect(492, 0, 20, 256);
+  return BUMP[kind] = new THREE.CanvasTexture(cv);
+}
+const SHINY = new Set(['giant_trevally', 'bluefin_trevally', 'bigeye_trevally', 'barracuda', 'chevron_barracuda', 'yellowfin', 'bluefin', 'sardine', 'indian_mackerel', 'hatchetfish', 'lanternfish', 'sailfish', 'blue_marlin', 'swordfish', 'oarfish', 'mahi', 'opah']);
 // ---------- per-species instanced meshes, animated in the vertex shader ----------
 const MODE_GLSL = [
   '',
@@ -638,7 +692,9 @@ const kinds = new Map();
 function kindOf(sp) {
   let k = kinds.get(sp.id); if (k) return k;
   const b = BUILD[sp.type](sp), geo = b.geo || merge(b.P), mode = b.mode || 0;
-  const mat = new THREE.MeshStandardMaterial({ map: makeTex(sp), roughness: 0.55, metalness: 0.05, side: THREE.DoubleSide, transparent: !!b.transparent, opacity: b.transparent || 1, depthWrite: !b.transparent, alphaTest: b.alphaTest || 0 });
+  const map = makeTex(sp), coral = CORAL.has(sp.type), shiny = SHINY.has(sp.id);
+  const mat = new THREE.MeshStandardMaterial({ map, roughness: shiny ? 0.28 : coral ? 0.8 : sp.type === 'whale' ? 0.35 : 0.45, metalness: shiny ? 0.55 : 0.05, side: THREE.DoubleSide, transparent: !!b.transparent, opacity: b.transparent || 1, depthWrite: !b.transparent, alphaTest: b.alphaTest || 0,
+    bumpMap: sp.type === 'fish' ? bumpFor('scales') : ['shark', 'ray'].includes(sp.type) ? bumpFor('skin') : coral ? map : null, bumpScale: coral ? 1.5 : 0.8 });
   if (sp.glow) { mat.emissive = new Color(sp.glow.c); mat.emissiveMap = makeGlowTex(sp); mat.emissiveIntensity = 0; }
   const amp = b.amp || 0;
   mat.onBeforeCompile = sh => {
@@ -1071,7 +1127,8 @@ function frame(now) {
   else { camera.position.copy(diver.p).addScaledVector(f, -4.2).add(_v.set(0, 1.2, 0)); pushOut(camera.position, 0.3); }
   if (camera.position.y > -0.12) camera.position.y = -0.12;
   camera.lookAt(_v.copy(diver.p).addScaledVector(f, 8).add(_v2.set(0, 0.9, 0)));
-  if (debugCam) { camera.position.copy(diver.p).add(debugCam.off); camera.lookAt(_v.copy(diver.p).add(debugCam.look || _v2.set(0, 0, 0))); }
+  if (debugCam?.target) { camera.position.copy(debugCam.target.p).add(debugCam.off); camera.lookAt(debugCam.target.p); }
+  else if (debugCam) { camera.position.copy(diver.p).add(debugCam.off); camera.lookAt(_v.copy(diver.p).add(debugCam.look || _v2.set(0, 0, 0))); }
   diverModel.grp.position.copy(diver.p);
   diverModel.grp.rotation.set(0, diver.yaw, diver.pitch);
   // light & water
