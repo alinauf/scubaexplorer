@@ -915,14 +915,25 @@ let debugCam = null, site = null, pool = [], hosts = [], cells = new Map(), summ
 const keys = {};
 const forward = (out = new Vector3()) => out.set(Math.cos(diver.pitch) * Math.cos(diver.yaw), Math.sin(diver.pitch), -Math.cos(diver.pitch) * Math.sin(diver.yaw));
 
+// ---------- settings & progress (saved in this browser) ----------
+const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } }, set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } } };
+const settings = Object.assign({ hideNames: true, sound: true, volume: 0.7, bloom: true, shadows: true, touch: 'auto' }, store.get('scuba-settings', {}));
+const progress = Object.assign({ discovered: {}, badges: {}, goals: {}, targets: {} }, store.get('scuba-progress', {}));
+const saveSettings = () => store.set('scuba-settings', settings), saveProgress = () => store.set('scuba-progress', progress);
+const kindName = sp => (sp.kind || (CORAL.has(sp.type) ? 'coral' : KIND[sp.type])).toLowerCase();
+const known = sp => !settings.hideNames || !!progress.discovered[sp.id];   // research mode hides names until you identify a photo
+const label = sp => known(sp) ? sp.name : `Unknown ${kindName(sp)}`;
+const diveOpts = { night: false, realistic: false };
+let diveStats = { start: 0, maxDepth: 0, warnings: [], extra: [] };
+
 function startDive(s) {
-  site = s; diveId = Date.now();
+  site = s; diveId = Date.now(); diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
   pool = species.filter(sp => !sp.host);
   hosts = species.filter(sp => sp.host);
   cells = new Map(); summoned = [];
   diver.p.set(edgeX(0) + 7, -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;
   $('site-name').textContent = `${s.name} · ${s.area}`;
-  $('picker').hidden = true; $('hud').hidden = false; closeCard();
+  $('picker').hidden = true; $('land').hidden = true; $('hud').hidden = false; closeCard();
   updateTiles(true);
   if (!startDive.seen) { startDive.seen = 1; $('help').hidden = false; }
 }
@@ -1048,7 +1059,7 @@ function stepCreature(c, dt, dSpeed) {
         if (dd < c.size * 0.35 + pr.size * 0.5 + 0.1) {
           kill(pr); c.prey = null; c.full = t + 25 + Math.random() * 25;
           for (let i = 0; i < 25; i++) bitList.push({ p: pr.p.clone(), v: new Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(1.5), age: 0 });
-          if (c.p.distanceTo(diver.p) < 35 && t > lastCatchToast + 3) lastCatchToast = t, toast(`${sp.type === 'shark' ? '🦈' : '🐟'} A ${sp.name.toLowerCase()} caught a ${pr.sp.name.toLowerCase()}!`);
+          if (c.p.distanceTo(diver.p) < 35 && t > lastCatchToast + 3) lastCatchToast = t, toast(`${sp.type === 'shark' ? '🦈' : '🐟'} A ${label(sp).toLowerCase()} caught a ${label(pr.sp).toLowerCase()}!`);
         }
       }
     }
@@ -1124,6 +1135,7 @@ function frame(now) {
   for (const c of live) stepCreature(c, dt, dSpeed);
 
   const depth = -diver.p.y, amb = ambient(depth), dark = 1 - amb;
+  diveStats.maxDepth = Math.max(diveStats.maxDepth, depth);
   // camera
   const f = forward();
   const fp = firstPerson || camMode;
@@ -1218,7 +1230,7 @@ function frame(now) {
     $('vf-tip').textContent = framing.tips[0] || 'Looks great — shoot!';
     $('vf-strobe').textContent = ambient(depth) < 0.75 ? 'Strobe AUTO' : 'Natural light';
   }
-  if (!camMode && (pickT -= dt) < 0) { pickT = 0.12; aimed = pick(); const lab = $('aim'); if (aimed) { lab.textContent = `${aimed.sp.name} · ${aimed.p.distanceTo(diver.p).toFixed(0)} m`; lab.hidden = false; } else lab.hidden = true; }
+  if (!camMode && (pickT -= dt) < 0) { pickT = 0.12; aimed = pick(); const lab = $('aim'); if (aimed) { lab.textContent = `${label(aimed.sp)} · ${aimed.p.distanceTo(diver.p).toFixed(0)} m`; lab.hidden = false; } else lab.hidden = true; }
 }
 
 // ---------- picking: what is the crosshair (or mouse) pointing at? ----------
@@ -1266,22 +1278,24 @@ function behaviour(sp) {
   return b.join(' · ');
 }
 const whereText = sp => sp.range || (sp.regions === 'all' ? 'Widespread, including the Maldives' : sp.regions.map(r => REGION[r]).join(', '));
-function fillCard(prefix, sp) {
-  const [label, col] = IUCN[sp.iucn], typ = sp.typ, fmt = n => n.toLocaleString();
-  $(prefix + 'kind').textContent = sp.kind || (CORAL.has(sp.type) ? 'Coral' : KIND[sp.type]);
-  $(prefix + 'name').textContent = sp.name; $(prefix + 'sci').textContent = sp.sci;
-  $(prefix + 'status').textContent = label; $(prefix + 'status').style.background = col;
-  $(prefix + 'native').textContent = isNative(sp) ? 'Native to the Maldives' : 'Not found in the Maldives';
-  $(prefix + 'native').className = 'tag ' + (isNative(sp) ? 'yes' : 'no');
-  $(prefix + 'depth').textContent = `${fmt(sp.depth[0])}–${fmt(sp.depth[1])} m` + (typ ? ` (usually ${fmt(typ[0])}–${fmt(typ[1])} m)` : '');
-  $(prefix + 'size').textContent = sp.sizeTxt || (sp.size < 1 ? `~${Math.round(sp.size * 100)} cm` : `~${sp.size} m`);
-  $(prefix + 'where').textContent = whereText(sp);
-  $(prefix + 'behave').textContent = behaviour(sp);
-  $(prefix + 'fact').textContent = sp.fact;
+function fillCard(prefix, sp) { fillCardEl(null, sp, prefix); }
+function fillCardEl(root, sp, prefix = null) {   // fills a card by id prefix, or a copy of #card-template
+  const f = k => prefix ? $(prefix + k) : root.querySelector(`[data-f=${k}]`), show = known(sp);
+  const [lab, col] = IUCN[sp.iucn], typ = sp.typ, fmt = n => n.toLocaleString();
+  f('kind').textContent = sp.kind || (CORAL.has(sp.type) ? 'Coral' : KIND[sp.type]);
+  f('name').textContent = label(sp); f('sci').textContent = show ? sp.sci : 'Species not yet identified';
+  f('status').textContent = lab; f('status').style.background = col; f('status').hidden = !show;
+  f('native').textContent = isNative(sp) ? 'Native to the Maldives' : 'Not found in the Maldives';
+  f('native').className = 'tag ' + (isNative(sp) ? 'yes' : 'no'); f('native').hidden = !show;
+  f('depth').textContent = `${fmt(sp.depth[0])}–${fmt(sp.depth[1])} m` + (typ ? ` (usually ${fmt(typ[0])}–${fmt(typ[1])} m)` : '');
+  f('size').textContent = sp.sizeTxt || (sp.size < 1 ? `~${Math.round(sp.size * 100)} cm` : `~${sp.size} m`);
+  f('where').textContent = show ? whereText(sp) : '?';
+  f('behave').textContent = behaviour(sp);
+  f('fact').textContent = show ? sp.fact : '📷 Photograph it (F), then research the photo at the research station to find out what it is.';
 }
 let cardSp = null;
 function openCard(c) {
-  cardSp = c.sp; fillCard('card-', c.sp);
+  cardSp = c.sp; fillCard('card-', c.sp); $('card-more').hidden = !known(c.sp);
   $('card-seen').textContent = `${c.p.distanceTo(diver.p).toFixed(0)} m away, at ${Math.round(-c.p.y).toLocaleString()} m depth`;
   $('card').hidden = false; document.exitPointerLock?.();
 }
@@ -1299,7 +1313,7 @@ function summon(sp) {
     else diver.p.set(wallX(d, z) + (sp.hab === 'pelagic' ? 15 : 5), -d, z);
     diver.yaw = sp.hab === 'pelagic' ? 0 : Math.PI; diver.pitch = -0.05; diver.v.set(0, 0, 0);
     cells = new Map(); updateTiles(true);
-    toast(`Dived to ${Math.round(d).toLocaleString()} m — where the ${sp.name.toLowerCase()} lives`);
+    toast(`Dived to ${Math.round(d).toLocaleString()} m — where the ${label(sp).toLowerCase()} lives`);
   }
   const f = forward(), d = -diver.p.y;
   if (sp.hab === 'benthic') {
@@ -1315,7 +1329,7 @@ function summon(sp) {
     const n = sp.school ? Math.min(sp.school[1], 14) - 1 : 0, spread = Math.max(0.6, sp.size * 4);
     for (let i = 0; i < n; i++) { const off = new Vector3((Math.random() - 0.5) * spread * 2, (Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread * 2); summoned.push(makeCreature(sp, p.clone().add(off), { leader: lead, off })); }
   }
-  toast(`${sp.name} is here — look ahead`);
+  toast(`${label(sp)} is here — look ahead`);
   canvas.focus();
 }
 
@@ -1331,7 +1345,7 @@ function renderGuide() {
   const q = $('g-search').value.trim().toLowerCase();
   for (const b of $('g-filters').children) b.classList.toggle('on', b.dataset.f === gFilter);
   const list = sorted.filter(sp => {
-    if (q && !(sp.name + ' ' + sp.sci).toLowerCase().includes(q)) return false;
+    if (q && !(known(sp) ? sp.name + ' ' + sp.sci : kindName(sp)).toLowerCase().includes(q)) return false;
     if (gFilter === 'native') return isNative(sp);
     if (gFilter === 'world') return !isNative(sp);
     if (gFilter[0] === 'z') { const z = ZONES[+gFilter.slice(1)]; return sp.depth[0] < z[1] && sp.depth[1] >= z[0]; }
@@ -1342,7 +1356,7 @@ function renderGuide() {
   for (const sp of list) {
     const li = document.createElement('li'); li.className = sp === gSel ? 'on' : '';
     li.innerHTML = `<span class="sw" style="background:${sp.c[0]}"></span><span class="nm"><b></b><i></i></span><span class="bar"><i style="left:${gaugePos(sp.depth[0]) * 100}%;right:${100 - gaugePos(sp.depth[1]) * 100}%"></i></span>`;
-    li.querySelector('b').textContent = sp.name; li.querySelector('i').textContent = sp.sci;
+    li.querySelector('b').textContent = label(sp); li.querySelector('i').textContent = known(sp) ? sp.sci : `${sp.depth[0].toLocaleString()}–${sp.depth[1].toLocaleString()} m`;
     li.onclick = () => { gSel = sp; renderGuide(); };
     $('g-list').appendChild(li);
   }
@@ -1371,10 +1385,8 @@ const photoDB = (() => {
   };
 })();
 let photos = [], camMode = false, zoom = 1, diveId = 0, lastShot = -9, framing = null, camT = 0;
-photoDB.all().then(list => { photos = list.sort((a, b) => a.time - b.time); updateShotCount(); });
+photoDB.all().then(list => { photos = list.sort((a, b) => a.time - b.time); updateShotCount(); if (!$('picker').hidden) renderSitePicker(); });
 const strobe = new THREE.PointLight(0xffffff, 0, 14, 1.2); scene.add(strobe);
-const kindName = sp => (sp.kind || (CORAL.has(sp.type) ? 'coral' : KIND[sp.type])).toLowerCase();
-
 function setCamMode(on) {
   camMode = on; $('viewfinder').hidden = !on; $('crosshair').hidden = on; $('aim').hidden = true; $('controls').hidden = on; $('gauge').hidden = on;
   if (!on) { zoom = 1; camera.fov = 70; camera.updateProjectionMatrix(); }
@@ -1413,7 +1425,8 @@ function analyzeFrame(withStrobe) {
     if (blur) tips.push('Motion blur — hold still while you shoot');
   } else tips.push('No animal in frame');
   const others = [...new Set(out.filter(o => o !== best && o.frac > 0.03 && o.light > 0.15).map(o => o.c.sp.id))].filter(id => id !== best?.c.sp.id);
-  return { best, stars, tips, others };
+  const same = best ? out.filter(o => o.c.sp.id === best.c.sp.id).length : 0;
+  return { best, stars, tips, others, same };
 }
 
 let actx = null;
@@ -1443,10 +1456,13 @@ async function shoot() {
   const b = shot.best;
   const photo = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, time: Date.now(), dive: diveId, site: site.name, area: site.area, depth: Math.round(-diver.p.y),
     img: cv.toDataURL('image/jpeg', 0.85), stars: shot.stars, tips: shot.tips, strobe: useStrobe, zoom: +zoom.toFixed(1),
-    subject: b ? { id: b.c.sp.id, kind: kindName(b.c.sp), dist: +b.dist.toFixed(1), depth: Math.round(-b.c.p.y) } : null, others: shot.others, researched: false };
+    subject: b ? { id: b.c.sp.id, kind: kindName(b.c.sp), dist: +b.dist.toFixed(1), depth: Math.round(-b.c.p.y), count: shot.same,
+      note: b.c.puff > 0.6 ? 'it had puffed itself up' : b.c.hide > 0.5 ? 'it was pulling back into its burrow' : b.c.prey ? 'it was chasing another fish' : b.c.sleep ? 'it was asleep in a bubble of mucus' : b.c.sp.mood === 'curious' ? 'it swam over to look at you' : b.c.fixed ? '' : b.c.flee > t ? 'it darted away from you' : '' } : null,
+    others: shot.others, researched: false, night: diveOpts.night };
   photos.push(photo); updateShotCount(); photoDB.put(photo);
   const st = '★'.repeat(shot.stars) + '☆'.repeat(3 - shot.stars);
-  toast(b ? `📷 ${st} Unidentified ${photo.subject.kind} at ${photo.depth} m${shot.tips.length ? ' — ' + shot.tips[0] : ''}` : `📷 ${shot.tips[0]}`);
+  toast(b ? `📷 ${st} ${known(b.c.sp) && progress.discovered[b.c.sp.id] ? b.c.sp.name : `Unidentified ${photo.subject.kind}`} at ${photo.depth} m${shot.tips.length ? ' — ' + shot.tips[0] : ''}` : `📷 ${shot.tips[0]}`);
+  checkGoals(photo, b?.c);
 }
 
 // ---------- photo log ----------
@@ -1462,7 +1478,7 @@ function renderPhotos() {
     const el = document.createElement('button'); el.className = 'ph';
     el.innerHTML = `<img alt=""><span class="st"></span><span class="cap"><b></b><small></small></span>`;
     el.querySelector('img').src = p.img; el.querySelector('.st').textContent = '★'.repeat(p.stars) + '☆'.repeat(3 - p.stars);
-    el.querySelector('b').textContent = p.subject ? `Unidentified ${p.subject.kind}` : 'No subject';
+    el.querySelector('b').textContent = p.subject ? (p.identified ? SP[p.identified].name : `Unidentified ${p.subject.kind}`) : 'No subject';
     el.querySelector('small').textContent = `${p.depth} m · ${p.site}`;
     el.onclick = () => showPhoto(p); $('ph-grid').appendChild(el);
   }
@@ -1470,14 +1486,14 @@ function renderPhotos() {
 function showPhoto(p) {
   viewing = p; $('pv').hidden = false;
   $('pv-img').src = p.img;
-  $('pv-title').textContent = p.subject ? `Unidentified ${p.subject.kind}` : 'No subject in frame';
+  $('pv-title').textContent = p.subject ? (p.identified ? SP[p.identified].name : `Unidentified ${p.subject.kind}`) : 'No subject in frame';
   $('pv-stars').textContent = '★'.repeat(p.stars) + '☆'.repeat(3 - p.stars);
   $('pv-meta').innerHTML = '';
   const rows = [['Where', `${p.site} · ${p.area}`], ['Depth', `${p.depth} m`], ['Taken', fmtTime(p.time)],
     ['Subject', p.subject ? `${p.subject.dist} m away at ${p.subject.depth} m depth` : '—'], ['Also in frame', p.others.length ? `${p.others.length} other kind${p.others.length > 1 ? 's' : ''} of animal` : 'nothing else'],
     ['Camera', `${p.zoom}× zoom${p.strobe ? ' · strobe' : ''}`], ['Tips', p.tips.length ? p.tips.join(' · ') : 'Great shot!']];
   for (const [k, v] of rows) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = k; dd.textContent = v; $('pv-meta').append(dt, dd); }
-  $('pv-note').hidden = !p.subject;
+  $('pv-note').hidden = !p.subject || !!p.identified;
   $('pv-download').href = p.img; $('pv-download').download = `scuba-${p.site.replace(/\W+/g, '-').toLowerCase()}-${p.depth}m-${p.id.slice(0, 13)}.jpg`;
 }
 function openPhotos() { $('photos').hidden = false; $('pv').hidden = true; document.exitPointerLock?.(); renderPhotos(); }
@@ -1488,14 +1504,230 @@ $('pv-back').onclick = () => { $('pv').hidden = true; };
 $('pv-delete').onclick = async () => { if (!viewing || !confirm('Delete this photo?')) return; photos = photos.filter(p => p !== viewing); await photoDB.del(viewing.id); updateShotCount(); $('pv').hidden = true; renderPhotos(); };
 canvas.addEventListener('wheel', e => { if (!camMode) return; e.preventDefault(); zoom = clamp(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 1, 4); updateZoom(); }, { passive: false });
 
+// ---------- dive summary ----------
+function endDive() {
+  if (diveOpts.realistic && -diver.p.y > 2) { toast(`Ascend to the surface to end the dive — you're at ${Math.round(-diver.p.y)} m`); return; }
+  const shots = photos.filter(p => p.dive === diveId), mins = Math.max(1, Math.round((t - diveStats.start) / 60));
+  $('sum-title').textContent = `${site.name} · ${diveOpts.night ? 'night' : 'day'} dive`;
+  const rows = [['Mode', diveOpts.realistic ? 'Realistic' : 'Explorer'], ['Dive time', `${mins} min`], ['Max depth', `${Math.round(diveStats.maxDepth).toLocaleString()} m`],
+    ['Photos', `${shots.length}${shots.length ? ` · ${shots.filter(p => p.stars === 3).length} three-star` : ''}`],
+    ['To research', `${shots.filter(p => p.subject && !progress.discovered[p.subject.id]).length} unidentified animal photo(s)`], ...(diveStats.extra || [])];
+  $('sum-meta').innerHTML = ''; for (const [k, v] of rows) { const a = document.createElement('dt'), b = document.createElement('dd'); a.textContent = k; b.textContent = v; $('sum-meta').append(a, b); }
+  $('sum-shots').innerHTML = ''; for (const p of shots.slice(-8)) { const i = document.createElement('img'); i.src = p.img; i.alt = ''; $('sum-shots').appendChild(i); }
+  $('sum-warn').hidden = !diveStats.warnings.length; $('sum-warn').textContent = diveStats.warnings.join(' · ');
+  setCamMode(false); closeCard(); $('guide').hidden = true; $('photos').hidden = true; document.exitPointerLock?.();
+  site = null; $('hud').hidden = true; $('summary').hidden = false;
+}
+$('change-site').onclick = endDive;
+$('sum-land').onclick = () => { $('summary').hidden = true; openLand(); };
+$('sum-sites').onclick = () => { $('summary').hidden = true; showPicker(); };
+
+// ---------- research station (part 3) ----------
+const BADGES = (() => {
+  const sharks = species.filter(s => s.type === 'shark' && isNative(s)).map(s => s.id), N = species.length;
+  const byFilter = (fn) => ids => ids.filter(id => fn(SP[id])).length;
+  return [
+    { id: 'first', icon: '🔍', name: 'First discovery', desc: 'Identify your first species', need: 1, count: ids => ids.length },
+    { id: 'ten', icon: '📘', name: 'Field naturalist', desc: 'Identify 10 species', need: 10, count: ids => ids.length },
+    { id: 'fifty', icon: '🎓', name: 'Marine biologist', desc: 'Identify 50 species', need: 50, count: ids => ids.length },
+    { id: 'all', icon: '🏆', name: 'Complete logbook', desc: `Identify all ${N} species`, need: N, count: ids => ids.length },
+    { id: 'big5', icon: '⭐', name: 'Maldives big five', desc: 'Whale shark, reef manta, green turtle, grey reef shark and Napoleon wrasse', need: 5, count: ids => ['whale_shark', 'reef_manta', 'green_turtle', 'grey_reef', 'napoleon'].filter(id => ids.includes(id)).length },
+    { id: 'sharks', icon: '🦈', name: `All ${sharks.length} Maldives sharks`, desc: 'Identify every shark native to the Maldives', need: sharks.length, count: ids => sharks.filter(id => ids.includes(id)).length },
+    { id: 'mammals', icon: '🐋', name: 'Marine mammals', desc: 'Identify 3 whales, dolphins, dugongs or sea lions', need: 3, count: byFilter(s => s.type === 'whale') },
+    { id: 'reef', icon: '🪸', name: 'Coral gardener', desc: 'Identify 10 corals, anemones, sponges or plants', need: 10, count: byFilter(s => CORAL.has(s.type)) },
+    { id: 'glow', icon: '✨', name: 'Glow hunter', desc: 'Identify 5 bioluminescent animals', need: 5, count: byFilter(s => !!s.glow) },
+    { id: 'midnight', icon: '🌑', name: 'Midnight zone', desc: 'Identify an animal that usually lives below 1,000 m', need: 1, count: byFilter(s => (s.typ || s.depth)[0] >= 1000) },
+    { id: 'hadal', icon: '🕳️', name: 'Hadal explorer', desc: 'Identify an animal from the trenches, below 6,000 m', need: 1, count: byFilter(s => (s.typ || s.depth)[0] >= 6000) },
+    { id: 'visitors', icon: '🌍', name: 'Visitors from afar', desc: 'Identify 5 species not found in the Maldives', need: 5, count: byFilter(s => !isNative(s)) },
+    { id: 'night', icon: '🌙', name: 'Night diver', desc: 'Identify an animal you photographed on a night dive', need: 1, count: () => photos.filter(p => p.night && p.identified).length },
+    { id: 'sharp', icon: '📸', name: 'Sharp shooter', desc: 'Take 10 three-star photos', need: 10, count: () => photos.filter(p => p.stars === 3).length },
+  ];
+})();
+function checkBadges() {
+  const ids = Object.keys(progress.discovered);
+  for (const b of BADGES) if (!progress.badges[b.id] && b.count(ids) >= b.need) { progress.badges[b.id] = Date.now(); toast(`🏅 Badge earned: ${b.name}`); }
+  saveProgress();
+}
+
+let landTab = 'identify', idSel = null, idState = null, logFilter2 = 'all', logSel = null;
+const needsResearch = () => photos.filter(p => p.subject && !p.researched);
+function openLand() {
+  // photos of species you already know are filed automatically
+  for (const p of photos) if (p.subject && !p.researched && progress.discovered[p.subject.id]) { p.researched = true; p.identified = p.subject.id; photoDB.put(p); }
+  $('picker').hidden = true; $('land').hidden = false; idSel = null; renderLand();
+}
+function closeLand() { $('land').hidden = true; showPicker(); }
+$('to-land').onclick = openLand; $('land-dive').onclick = closeLand;
+$('land-tabs').onclick = e => { const k = e.target.closest('button')?.dataset.t; if (k) { landTab = k; renderLand(); } };
+function renderLand() {
+  const n = needsResearch().length, found = Object.keys(progress.discovered).length;
+  for (const b of $('land-tabs').children) b.classList.toggle('on', b.dataset.t === landTab);
+  $('lt-identify').textContent = n ? `Identify photos (${n})` : 'Identify photos';
+  $('lt-logbook').textContent = `Species logbook · ${found}/${species.length}`;
+  $('lt-badges').textContent = `Badges · ${Object.keys(progress.badges).length}/${BADGES.length}`;
+  for (const id of ['identify', 'logbook', 'badges']) $('land-' + id).hidden = landTab !== id;
+  if (landTab === 'identify') renderIdentify(); else if (landTab === 'logbook') renderLogbook(); else renderBadges();
+}
+
+// Look-alikes: same body type, similar size, mostly animals that could also be found at that depth.
+function candidates(p) {
+  const sp = SP[p.subject.id], R = rng(hash(p.id)), d = p.subject.depth, h = sp.f?.h || 0.4;
+  const scored = species.filter(s => s !== sp).map(s => {
+    const ratio = Math.max(s.size, sp.size) / Math.min(s.size, sp.size);
+    const score = (s.type === sp.type ? 4 : kindName(s) === kindName(sp) ? 3 : 0) + (d >= s.depth[0] && d <= s.depth[1] ? 2 : 0) + (ratio < 2 ? 1.5 : ratio < 4 ? 0.5 : 0) + (Math.abs((s.f?.h || 0.4) - h) < 0.15 ? 0.5 : 0) + R() * 1.2;
+    return { s, score };
+  }).sort((a, b) => b.score - a.score).slice(0, 3).map(o => o.s);
+  const opts = [sp, ...scored];
+  for (let i = opts.length - 1; i > 0; i--) { const j = (R() * (i + 1)) | 0; [opts[i], opts[j]] = [opts[j], opts[i]]; }
+  return opts;
+}
+const sizeText = m => m < 1 ? `${Math.max(1, Math.round(m * 70))}–${Math.round(m * 130)} cm` : `${(m * 0.7).toFixed(1)}–${(m * 1.3).toFixed(1)} m`;
+function clues(p) {
+  const sp = SP[p.subject.id], s = p.subject, out = [];   // better photos reveal more
+  out.push(['📍', 'Where', `${p.site}, ${p.area}${p.night ? ' · at night' : ''}`]);
+  out.push(['🌊', 'Depth', `${s.depth.toLocaleString()} m`]);
+  out.push(['🧬', 'Body type', s.kind]);
+  if (p.stars >= 2) out.push(['📏', 'Estimated size', sizeText(sp.size)]);
+  if (p.stars >= 2) out.push(['👥', 'Seen', s.count > 1 ? `in a group of about ${s.count}` : sp.hab === 'benthic' ? 'attached to the reef or seabed' : 'on its own']);
+  if (p.stars >= 3) out.push(['🎨', 'Colours', `mostly ${colourName(sp.c[0])}${sp.c[1] && colourName(sp.c[1]) !== colourName(sp.c[0]) ? ` with ${colourName(sp.c[1])}` : ''}`]);
+  if (p.stars >= 3 && s.note) out.push(['👀', 'Behaviour', s.note]);
+  if (p.stars < 3) out.push(['💡', 'Tip', 'Sharper, closer photos (★★★) give you more clues']);
+  return out;
+}
+function colourName(hex) {
+  const [r, g, b] = rgb(hex), mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 510;
+  if (mx - mn < 28) return l > 0.8 ? 'white' : l < 0.2 ? 'black' : 'grey';
+  const hue = new Color(hex).getHSL({}).h * 360;
+  const name = hue < 15 || hue >= 340 ? 'red' : hue < 40 ? 'orange' : hue < 65 ? 'yellow' : hue < 160 ? 'green' : hue < 200 ? 'teal' : hue < 255 ? 'blue' : hue < 290 ? 'purple' : 'pink';
+  return l < 0.3 ? `dark ${name}` : l > 0.75 ? `pale ${name}` : name;
+}
+function whyNot(pick, p) {
+  const s = p.subject, d = s.depth, true_ = SP[s.id];
+  if (d < pick.depth[0] || d > pick.depth[1]) return `${pick.name} lives at ${pick.depth[0].toLocaleString()}–${pick.depth[1].toLocaleString()} m, not ${d.toLocaleString()} m.`;
+  const ratio = pick.size / true_.size;
+  if (ratio > 2.5) return `${pick.name} is much bigger than this animal.`;
+  if (ratio < 0.4) return `${pick.name} is much smaller than this animal.`;
+  if (pick.type !== true_.type) return `${pick.name} has a different body shape.`;
+  return `Not quite — compare the colours and fin shapes with ${pick.name} again.`;
+}
+function renderIdentify() {
+  const keep = idSel && idState?.done, list = needsResearch();   // keep showing a just-solved photo until "Next"
+  if (keep && !list.includes(idSel)) list.unshift(idSel);
+  $('id-list').innerHTML = '';
+  if (!list.length) { $('id-work').innerHTML = `<div class="id-empty"><h3>All caught up 🎉</h3><p>Every photo is identified. Go diving and photograph animals you haven't met yet — raise your camera with <kbd>F</kbd>.</p></div>`; return; }
+  if (!idSel || !list.includes(idSel)) { idSel = list[0]; idState = null; }
+  for (const p of list) {
+    const b = document.createElement('button'); b.className = 'id-thumb' + (p === idSel ? ' on' : '');
+    b.innerHTML = '<img alt=""><span></span>'; b.querySelector('img').src = p.img; b.querySelector('span').textContent = `${'★'.repeat(p.stars)} · ${p.subject.depth} m`;
+    b.onclick = () => { idSel = p; idState = null; renderIdentify(); }; $('id-list').appendChild(b);
+  }
+  const p = idSel; idState = idState || { opts: candidates(p), wrong: [], done: false };
+  const w = $('id-work'); w.innerHTML = '';
+  const img = document.createElement('img'); img.className = 'id-photo'; img.src = p.img; img.alt = 'Photo to identify'; w.appendChild(img);
+  const notes = document.createElement('div'); notes.className = 'id-notes';
+  notes.innerHTML = '<h3>Field notes</h3><ul></ul>';
+  for (const [ic, k, v] of clues(p)) { const li = document.createElement('li'); li.innerHTML = '<span></span><b></b><em></em>'; li.children[0].textContent = ic; li.children[1].textContent = k; li.children[2].textContent = v; notes.querySelector('ul').appendChild(li); }
+  w.appendChild(notes);
+  const q = document.createElement('div'); q.className = 'id-q';
+  q.innerHTML = `<h3>Which species is it?</h3><div class="id-opts"></div><p class="id-msg"></p>`;
+  for (const s of idState.opts) {
+    const b = document.createElement('button'); b.className = 'id-opt';
+    const bad = idState.wrong.includes(s.id), right = idState.done && s.id === p.subject.id;
+    if (bad) b.classList.add('bad'); if (right) b.classList.add('good');
+    b.disabled = bad || idState.done;
+    b.innerHTML = '<i></i><b></b><small></small><span></span>';
+    b.querySelector('i').style.background = s.c[0]; b.querySelector('b').textContent = s.name; b.querySelector('small').textContent = s.sci;
+    b.querySelector('span').textContent = `${s.depth[0].toLocaleString()}–${s.depth[1].toLocaleString()} m · ${s.sizeTxt || (s.size < 1 ? `~${Math.round(s.size * 100)} cm` : `~${s.size} m`)}`;
+    b.onclick = () => guess(s); q.querySelector('.id-opts').appendChild(b);
+  }
+  w.appendChild(q);
+  if (idState.msg) q.querySelector('.id-msg').textContent = idState.msg;
+  if (idState.done) {
+    const card = document.createElement('div'); card.className = 'id-result'; card.innerHTML = $('card-template').innerHTML; w.appendChild(card);
+    fillCardEl(card, SP[p.subject.id]);
+    const next = document.createElement('button'); next.className = 'btn primary'; next.textContent = needsResearch().length ? 'Next photo →' : 'Done';
+    next.onclick = () => { idSel = null; idState = null; renderLand(); }; card.appendChild(next);
+  }
+}
+function guess(s) {
+  const p = idSel, sp = SP[p.subject.id];
+  if (s.id === sp.id) {
+    const isNew = !progress.discovered[sp.id];
+    idState.done = true; idState.msg = isNew ? `✅ Correct! New species: ${sp.name}` : `✅ Correct — ${sp.name}`;
+    identify(p, sp.id);
+  } else {
+    idState.wrong.push(s.id);
+    if (idState.wrong.length >= 2) { idState.done = true; idState.msg = `${whyNot(s, p)} It was the ${sp.name.toLowerCase()} — added to your logbook.`; identify(p, sp.id); }
+    else idState.msg = `❌ ${whyNot(s, p)} Try again.`;
+  }
+  renderLand();
+}
+function identify(p, id) {
+  if (!progress.discovered[id]) progress.discovered[id] = { time: Date.now(), photo: p.id };
+  for (const q of photos) if (q.subject?.id === id && !q.researched) { q.researched = true; q.identified = id; photoDB.put(q); }
+  saveProgress(); checkBadges(); checkGoals();
+}
+
+function renderLogbook() {
+  const ids = Object.keys(progress.discovered), N = species.length;
+  $('lb-progress').style.width = `${ids.length / N * 100}%`;
+  $('lb-count').textContent = `${ids.length} / ${N} species discovered`;
+  for (const b of $('lb-filters').children) b.classList.toggle('on', b.dataset.f === logFilter2);
+  const has = s => !!progress.discovered[s.id];
+  const list = sorted.filter(s => ({ all: true, found: has(s), missing: !has(s), native: isNative(s) })[logFilter2]);
+  const grid = $('lb-grid'); grid.innerHTML = '';
+  for (const s of list) {
+    const found = !!progress.discovered[s.id], b = document.createElement('button'); b.className = 'lb-card' + (found ? '' : ' unknown');
+    const best = found && photos.filter(p => p.identified === s.id).sort((a, b) => b.stars - a.stars)[0];
+    b.innerHTML = '<div class="pic"></div><b></b><small></small>';
+    if (best) { const i = document.createElement('img'); i.src = best.img; i.alt = ''; b.firstChild.appendChild(i); } else { b.firstChild.style.background = found ? s.c[0] : ''; b.firstChild.textContent = found ? '' : '?'; }
+    b.querySelector('b').textContent = found ? s.name : `Unknown ${kindName(s)}`;
+    b.querySelector('small').textContent = found ? s.sci : zoneOf(midDepth(s))[2];
+    b.disabled = !found; b.onclick = () => { logSel = s; showLogCard(); };
+    grid.appendChild(b);
+  }
+}
+function showLogCard() { const s = logSel; $('lb-detail').hidden = false; $('lb-card').innerHTML = $('card-template').innerHTML; fillCardEl($('lb-card'), s); const n = photos.filter(p => p.identified === s.id).length; $('lb-photos').textContent = n ? `You have ${n} photo${n > 1 ? 's' : ''} of this species.` : ''; }
+$('lb-close').onclick = () => { $('lb-detail').hidden = true; };
+$('lb-filters').onclick = e => { const f = e.target.dataset?.f; if (f) { logFilter2 = f; renderLogbook(); } };
+function renderBadges() {
+  const ids = Object.keys(progress.discovered), g = $('bd-grid'); g.innerHTML = '';
+  for (const b of BADGES) {
+    const n = Math.min(b.need, b.count(ids)), got = !!progress.badges[b.id], el = document.createElement('div');
+    el.className = 'badge' + (got ? ' got' : '');
+    el.innerHTML = '<span class="ic"></span><b></b><small></small><div class="bar2"><i></i></div><em></em>';
+    el.querySelector('.ic').textContent = b.icon; el.querySelector('b').textContent = b.name; el.querySelector('small').textContent = b.desc;
+    el.querySelector('.bar2 i').style.width = `${n / b.need * 100}%`; el.querySelector('em').textContent = got ? `Earned ${new Date(progress.badges[b.id]).toLocaleDateString()}` : `${n} / ${b.need}`;
+    g.appendChild(el);
+  }
+  renderGoalsInto($('bd-goals'));
+}
+
+// ---------- settings ----------
+function openSettings() {
+  $('settings').hidden = false; document.exitPointerLock?.();
+  $('set-hide').checked = settings.hideNames; $('set-sound').checked = settings.sound; $('set-volume').value = settings.volume;
+  $('set-bloom').checked = settings.bloom; $('set-shadows').checked = settings.shadows; $('set-touch').value = settings.touch;
+}
+$('open-settings').onclick = openSettings; $('hud-settings').onclick = openSettings; $('land-settings').onclick = openSettings;
+$('set-close').onclick = () => { $('settings').hidden = true; };
+for (const [id, key, ev] of [['set-hide', 'hideNames', 'checked'], ['set-sound', 'sound', 'checked'], ['set-volume', 'volume', 'value'], ['set-bloom', 'bloom', 'checked'], ['set-shadows', 'shadows', 'checked'], ['set-touch', 'touch', 'value']])
+  $(id).addEventListener('input', () => { settings[key] = ev === 'value' && key === 'volume' ? +$(id).value : $(id)[ev]; saveSettings(); applySettings(); });
+$('set-reset').onclick = () => { if (!confirm('Reset your logbook, badges and goals? Photos are kept but become unidentified again.')) return; progress.discovered = {}; progress.badges = {}; progress.goals = {}; progress.targets = {}; saveProgress(); for (const p of photos) { p.researched = false; delete p.identified; photoDB.put(p); } toast('Progress reset'); };
+function applySettings() { applyGraphics(); applyAudio(); applyTouch(); renderSitePicker(); }
+// filled in by later features
+function applyGraphics() {} function applyAudio() {} function applyTouch() {}
+function checkGoals() {} function renderGoalsInto(el) { el.innerHTML = ''; }
+
+
 // ---------- input ----------
-const uiOpen = () => !$('guide').hidden || !$('help').hidden || !$('picker').hidden || !$('photos').hidden;
+const uiOpen = () => ['guide', 'help', 'picker', 'photos', 'settings', 'summary', 'land'].some(id => !$(id).hidden);
 let locked = false, lockFailed = false, drag = null;
 document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; if (locked) mouseNDC = null; });
 document.addEventListener('pointerlockerror', () => { lockFailed = true; });
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') { if (e.code === 'Escape') $('guide').hidden = true; return; }
-  if (e.code === 'Escape') { if (!$('pv').hidden) $('pv').hidden = true; else if (!$('photos').hidden) $('photos').hidden = true; else if (camMode) setCamMode(false); $('guide').hidden = true; $('help').hidden = true; closeCard(); return; }
+  if (e.code === 'Escape') { if (!$('settings').hidden) { $('settings').hidden = true; return; } if (!$('pv').hidden) $('pv').hidden = true; else if (!$('photos').hidden) $('photos').hidden = true; else if (camMode) setCamMode(false); $('guide').hidden = true; $('help').hidden = true; closeCard(); return; }
   if (!site) return;
   if (e.code === 'KeyG') { e.preventDefault(); $('guide').hidden ? openGuide() : ($('guide').hidden = true); return; }
   if (e.code === 'KeyH') { $('help').hidden = !$('help').hidden; return; }
@@ -1528,17 +1760,29 @@ addEventListener('mousemove', e => {
 });
 $('help-close').onclick = () => { $('help').hidden = true; };
 $('open-help').onclick = () => { $('help').hidden = false; };
-$('change-site').onclick = () => { setCamMode(false); site = null; $('hud').hidden = true; closeCard(); $('guide').hidden = true; $('picker').hidden = false; document.exitPointerLock?.(); };
 
 // ---------- site picker ----------
-for (const s of sites) {
-  const el = document.createElement('button'); el.className = 'site';
-  const stars = Object.entries(s.featured).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([id]) => SP[id].name);
-  el.innerHTML = '<b></b><small></small><p></p><em></em><span class="go">Dive here →</span>';
-  el.querySelector('b').textContent = s.name; el.querySelector('small').textContent = s.area;
-  el.querySelector('p').textContent = s.desc; el.querySelector('em').textContent = 'Look for: ' + stars.join(', ');
-  el.onclick = () => startDive(s); $('sites').appendChild(el);
+function renderSitePicker() {
+  $('sites').innerHTML = '';
+  for (const s of sites) {
+    const el = document.createElement('button'); el.className = 'site';
+    const stars = [...new Set(Object.entries(s.featured).sort((a, b) => b[1] - a[1]).map(([id]) => label(SP[id])))].slice(0, 4);
+    el.innerHTML = '<b></b><small></small><p></p><em></em><span class="go">Dive here →</span>';
+    el.querySelector('b').textContent = s.name; el.querySelector('small').textContent = s.area;
+    el.querySelector('p').textContent = s.desc; el.querySelector('em').textContent = 'Look for: ' + stars.join(', ');
+    el.onclick = () => startDive(s); $('sites').appendChild(el);
+  }
+  for (const b of $('opt-time').querySelectorAll('button')) b.classList.toggle('on', (b.dataset.v === 'night') === diveOpts.night);
+  for (const b of $('opt-mode').querySelectorAll('button')) b.classList.toggle('on', (b.dataset.v === 'realistic') === diveOpts.realistic);
+  $('mode-note').textContent = diveOpts.realistic
+    ? 'Realistic: a real dive computer — limited air that drains faster the deeper you go, no-decompression limits, slow ascents and a safety stop. The deep zones are out of reach, just as they are for real divers.'
+    : 'Explorer: unlimited air and no decompression — dive anywhere, all the way to the trench floor.';
+  const n = needsResearch().length; $('to-land').textContent = `🏝️ Research station${n ? ` · ${n} to identify` : ''}`;
 }
+function showPicker() { renderSitePicker(); $('picker').hidden = false; $('land').hidden = true; }
+$('opt-time').onclick = e => { const v = e.target.closest('button')?.dataset.v; if (v) { diveOpts.night = v === 'night'; renderSitePicker(); } };
+$('opt-mode').onclick = e => { const v = e.target.closest('button')?.dataset.v; if (v) { diveOpts.realistic = v === 'realistic'; renderSitePicker(); } };
+renderSitePicker();
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
 window.scuba = { CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle

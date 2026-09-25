@@ -126,7 +126,76 @@
   #pv-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(255,216,74,.1); border: 1px solid rgba(255,216,74,.3); font-size: 14px; }
   #pv .row { display: flex; gap: 8px; margin-top: auto; } #pv .row > * { flex: 1; text-align: center; text-decoration: none; }
 
+  /* dive setup */
+  #setup { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 0 0 10px; }
+  .seg-ctl { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(3, 16, 31, 0.6); border: 1px solid #1d5a80; }
+  .seg-ctl span { padding: 0 8px 0 10px; color: #8fb8cc; font-size: 13px; }
+  .seg-ctl button { padding: 6px 14px; border-radius: 999px; border: 0; background: transparent; }
+  .seg-ctl button.on { background: #ffd84a; color: #062033; font-weight: 600; }
+  .setup-btns { display: flex; gap: 8px; margin-left: auto; }
+  #mode-note { margin: 0 0 22px; color: #9fcbe0; font-size: 14px; max-width: 760px; }
+
+  /* modals: settings & dive summary */
+  .modal { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 8, 16, 0.6); padding: 16px; z-index: 5; }
+  .modal .card { position: relative; width: min(480px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: rgba(4, 24, 42, 0.97); }
+  .opt { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 0; border-bottom: 1px solid rgba(127,224,255,.1); }
+  .opt small { display: block; color: #8fb8cc; }
+  .opt input[type=checkbox] { width: 20px; height: 20px; accent-color: #ffd84a; }
+  .opt select, .opt input[type=range] { accent-color: #ffd84a; }
+  #sum-shots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 12px; }
+  #sum-shots img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 6px; }
+  #sum-warn { padding: 8px 12px; border-radius: 8px; background: rgba(232,112,42,.15); border: 1px solid rgba(232,112,42,.4); font-size: 14px; }
+  .row2 { display: flex; gap: 8px; } .row2 .btn { flex: 1; }
+
+  /* research station — on land: warm sand and lagoon colours */
+  #land { position: fixed; inset: 0; overflow-y: auto; background: linear-gradient(170deg, #f6ecd2 0%, #efe1bd 40%, #cfe9e4 100%); color: #1f2a33; z-index: 4; }
+  #land .wrap { max-width: 1160px; margin: 0 auto; padding: 26px 22px 60px; }
+  .land-top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .land-top h1 { margin: 0; font-size: 30px; } .land-top p { margin: 0; color: #5b6b73; flex: 1 1 280px; }
+  #land .btn { border-color: rgba(31,42,51,.25); background: rgba(255,255,255,.6); color: #1f2a33; }
+  #land .btn.primary { background: #0f6f8c; border-color: #0f6f8c; color: #fff; }
+  #land-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+  #land-tabs button { padding: 8px 16px; border-radius: 999px; border: 1px solid rgba(31,42,51,.2); background: rgba(255,255,255,.5); color: #1f2a33; }
+  #land-tabs button.on { background: #1f2a33; color: #fff; }
+  .panel { background: rgba(255,255,255,.72); border-radius: 16px; padding: 18px; box-shadow: 0 8px 30px rgba(60,50,20,.12); }
+  #land-identify { display: grid; grid-template-columns: 190px 1fr; gap: 16px; }
+  #id-list { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow-y: auto; }
+  .id-thumb { padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; background: #fff; text-align: left; color: #1f2a33; }
+  .id-thumb.on { border-color: #0f6f8c; } .id-thumb img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: cover; } .id-thumb span { display: block; padding: 4px 8px; font-size: 12px; color: #a07a10; }
+  #id-work { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; align-content: start; }
+  .id-photo { width: 100%; border-radius: 12px; grid-column: 1; }
+  .id-notes h3, .id-q h3 { margin: 0 0 8px; }
+  .id-notes ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .id-notes li { display: grid; grid-template-columns: 24px 110px 1fr; font-size: 14px; } .id-notes li em { font-style: normal; } .id-notes li b { color: #5b6b73; font-weight: 500; }
+  .id-q { grid-column: 1 / -1; }
+  .id-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .id-opt { display: grid; grid-template-columns: 16px 1fr; gap: 2px 10px; text-align: left; padding: 12px; border-radius: 12px; border: 2px solid rgba(31,42,51,.15); background: #fff; color: #1f2a33; }
+  .id-opt:hover:not(:disabled) { border-color: #0f6f8c; } .id-opt i { width: 16px; height: 16px; border-radius: 50%; grid-row: span 3; margin-top: 2px; border: 1px solid rgba(0,0,0,.2); }
+  .id-opt small { font-style: italic; color: #5b6b73; } .id-opt span { font-size: 12px; color: #5b6b73; }
+  .id-opt.bad { border-color: #d8342c; opacity: .55; } .id-opt.good { border-color: #2f9a58; background: #eaf7ee; }
+  .id-msg { font-weight: 600; min-height: 1.4em; }
+  .id-result { grid-column: 1 / -1; background: #1f2a33; color: #e8f4fa; border-radius: 14px; padding: 18px; }
+  .id-empty { grid-column: 1 / -1; text-align: center; padding: 50px 20px; }
+  #lb-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+  .lb-bar { flex: 1 1 200px; height: 10px; border-radius: 5px; background: rgba(31,42,51,.12); overflow: hidden; } #lb-progress { height: 100%; background: linear-gradient(90deg, #0f6f8c, #3fb4d6); }
+  #lb-filters { display: flex; gap: 6px; } #lb-filters button { padding: 5px 12px; border-radius: 999px; border: 1px solid rgba(31,42,51,.2); background: transparent; color: #1f2a33; font-size: 13px; } #lb-filters button.on { background: #1f2a33; color: #fff; }
+  #lb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .lb-card { padding: 0 0 8px; border-radius: 12px; border: 1px solid rgba(31,42,51,.12); background: #fff; color: #1f2a33; text-align: left; overflow: hidden; display: flex; flex-direction: column; }
+  .lb-card .pic { aspect-ratio: 16/10; display: grid; place-items: center; font-size: 34px; color: rgba(31,42,51,.3); background: #e9e3d2; overflow: hidden; } .lb-card .pic img { width: 100%; height: 100%; object-fit: cover; }
+  .lb-card b { padding: 6px 10px 0; font-size: 14px; } .lb-card small { padding: 0 10px; color: #5b6b73; font-size: 12px; font-style: italic; }
+  .lb-card.unknown b { color: #7b8a92; } .lb-card:disabled { cursor: default; }
+  #lb-detail { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,8,16,.5); padding: 16px; z-index: 6; }
+  #lb-detail .card { position: relative; width: min(440px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: rgba(4, 24, 42, 0.97); color: #e8f4fa; }
+  #bd-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .badge { background: #fff; border-radius: 12px; padding: 14px; display: grid; grid-template-columns: 44px 1fr; gap: 2px 10px; opacity: .6; }
+  .badge.got { opacity: 1; box-shadow: 0 0 0 2px #e0b020 inset; } .badge .ic { font-size: 30px; grid-row: span 4; filter: grayscale(1); } .badge.got .ic { filter: none; }
+  .badge small { color: #5b6b73; } .badge em { font-style: normal; font-size: 12px; color: #a07a10; }
+  .bar2 { height: 6px; border-radius: 3px; background: rgba(31,42,51,.1); overflow: hidden; margin: 4px 0; } .bar2 i { display: block; height: 100%; background: #e0b020; }
+  #land kbd { background: rgba(31,42,51,.1); }
+
   @media (max-width: 760px) {
+    #land-identify, #id-work { grid-template-columns: 1fr; } #id-list { flex-direction: row; overflow-x: auto; max-height: none; } .id-thumb { min-width: 150px; }
+    .setup-btns { margin-left: 0; }
     #pv { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } #pv aside { border-left: 0; }
     #card { right: 16px; left: 16px; top: auto; bottom: 16px; width: auto; max-height: 60vh; }
     #controls { white-space: normal; text-align: center; width: calc(100% - 32px); }
@@ -145,6 +214,12 @@
   <div class="wrap">
     <h1>Scuba Explorer · Maldives</h1>
     <p class="sub">Pick a real Maldives dive site and explore in 3D, from the sunlit reef all the way down to the trench floor at 10,935 m. There are <b id="species-count"></b> real species, each at the depths where it actually lives, and you can summon any of them from the fish guide.</p>
+    <div id="setup">
+      <div class="seg-ctl" id="opt-time"><span>Time</span><button data-v="day">☀️ Day</button><button data-v="night">🌙 Night</button></div>
+      <div class="seg-ctl" id="opt-mode"><span>Mode</span><button data-v="explorer">Explorer</button><button data-v="realistic">Realistic</button></div>
+      <div class="setup-btns"><button id="to-land" class="btn">🏝️ Research station</button><button id="open-settings" class="btn">⚙️ Settings</button></div>
+    </div>
+    <p id="mode-note"></p>
     <div id="sites"></div>
   </div>
 </section>
@@ -166,7 +241,8 @@
     <button id="open-photos" class="btn">Photos (P)</button>
     <button id="open-guide" class="btn">Fish guide (G)</button>
     <button id="open-help" class="btn">Controls (H)</button>
-    <button id="change-site" class="btn">Change site</button>
+    <button id="hud-settings" class="btn" aria-label="Settings">⚙️</button>
+    <button id="change-site" class="btn">End dive</button>
   </div>
   <div id="gauge"></div>
   <div id="crosshair"></div>
@@ -270,6 +346,60 @@
   </div>
 </div>
 <div id="flash"></div>
+
+<div id="summary" class="modal" hidden>
+  <div class="card glass">
+    <div class="kind">Dive complete</div>
+    <h2 id="sum-title"></h2>
+    <dl id="sum-meta" style="margin-top:12px"></dl>
+    <div id="sum-shots"></div>
+    <p id="sum-warn" hidden></p>
+    <div class="row2"><button id="sum-land" class="btn primary">🏝️ Research your photos</button><button id="sum-sites" class="btn">Dive sites</button></div>
+  </div>
+</div>
+
+<div id="settings" class="modal" hidden>
+  <div class="card glass">
+    <button id="set-close" class="x" aria-label="Close">×</button>
+    <h2>Settings</h2>
+    <label class="opt"><span>Research mode<small>Hide animal names until you identify them from your photos</small></span><input type="checkbox" id="set-hide"></label>
+    <label class="opt"><span>Sound</span><input type="checkbox" id="set-sound"></label>
+    <label class="opt"><span>Volume</span><input type="range" id="set-volume" min="0" max="1" step="0.05"></label>
+    <label class="opt"><span>Glow (bloom)<small>Bioluminescence and bright light glow</small></span><input type="checkbox" id="set-bloom"></label>
+    <label class="opt"><span>Shadows<small>Soft shadows in the sunlit shallows</small></span><input type="checkbox" id="set-shadows"></label>
+    <label class="opt"><span>Touch controls</span><select id="set-touch"><option value="auto">Automatic</option><option value="on">Always on</option><option value="off">Off</option></select></label>
+    <p style="margin:14px 0 0"><button id="set-reset" class="btn">Reset logbook &amp; badges</button></p>
+  </div>
+</div>
+
+<section id="land" hidden>
+  <div class="wrap">
+    <div class="land-top">
+      <h1>🏝️ Research station</h1>
+      <p>Back on the island. Compare your photos with the field guides to work out what you saw.</p>
+      <button id="land-settings" class="btn" aria-label="Settings">⚙️</button>
+      <button id="land-dive" class="btn primary">Go diving →</button>
+    </div>
+    <nav id="land-tabs"><button data-t="identify" id="lt-identify"></button><button data-t="logbook" id="lt-logbook"></button><button data-t="badges" id="lt-badges"></button></nav>
+    <div id="land-identify" class="panel"><div id="id-list"></div><div id="id-work"></div></div>
+    <div id="land-logbook" class="panel" hidden>
+      <div id="lb-head"><b id="lb-count"></b><div class="lb-bar"><div id="lb-progress"></div></div>
+        <nav id="lb-filters"><button data-f="all">All</button><button data-f="found">Discovered</button><button data-f="missing">Not yet</button><button data-f="native">Maldives natives</button></nav></div>
+      <div id="lb-grid"></div>
+    </div>
+    <div id="land-badges" class="panel" hidden><h3 style="margin-top:0">Badges</h3><div id="bd-grid"></div><div id="bd-goals"></div></div>
+  </div>
+  <div id="lb-detail" hidden><div class="card glass"><button id="lb-close" class="x" aria-label="Close">×</button><div id="lb-card"></div><p id="lb-photos"></p></div></div>
+</section>
+
+<template id="card-template">
+  <div data-f="kind" class="kind"></div>
+  <h2 data-f="name"></h2>
+  <span data-f="sci" class="sci"></span>
+  <div class="chips"><span data-f="status" class="chip"></span><span data-f="native" class="tag"></span></div>
+  <dl><dt>Depth</dt><dd data-f="depth"></dd><dt>Size</dt><dd data-f="size"></dd><dt>Lives in</dt><dd data-f="where"></dd><dt>Behaviour</dt><dd data-f="behave"></dd></dl>
+  <p data-f="fact"></p>
+</template>
 
 <script src="data.js"></script>
 <script src="game.js"></script>
