@@ -932,7 +932,7 @@ const diveOpts = { night: false, realistic: false };
 let diveStats = { start: 0, maxDepth: 0, warnings: [], extra: [] };
 
 function startDive(s) {
-  site = s; diveId = Date.now(); { const [v, deg] = s.current || [0, 0], a = deg * Math.PI / 180; curBase.set(Math.sin(a) * v, 0, -Math.cos(a) * v); } dayLight = diveOpts.night ? 0.012 : 1;
+  site = s; diveId = Date.now(); audio.init(); { const [v, deg] = s.current || [0, 0], a = deg * Math.PI / 180; curBase.set(Math.sin(a) * v, 0, -Math.cos(a) * v); } dayLight = diveOpts.night ? 0.012 : 1;
   surface.material.color.set(diveOpts.night ? 0x1c2a3c : 0xdff6ff); CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
   $('computer').hidden = !diveOpts.realistic;
   pool = species.filter(sp => !sp.host);
@@ -1137,7 +1137,9 @@ function stepDiver(dt) {
   diver.p.addScaledVector(diver.v, dt).addScaledVector(currentAt(diver.p), dt);
   pushOut(diver.p, 0.9);
   diver.kick += dt * (1.5 + diver.v.length() * (turbo ? 0.3 : 2.5));
-  if ((diver.breath -= dt) < 0 && depth > 1.5) { diver.breath = 3.5; for (let i = 0; i < 8; i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
+  const prevBreath = diver.breath;
+  if (prevBreath > 1.9 && (diver.breath - dt) <= 1.9 && depth > 1) audio.inhale(turbo);
+  if ((diver.breath -= dt) < 0 && depth > 1) { diver.breath = turbo ? 2.4 : 3.5; audio.exhale(turbo); if (depth > 1.5) for (let i = 0; i < 8; i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
 }
 
 // ---------- dive computer (realistic mode) ----------
@@ -1179,7 +1181,7 @@ function updateComputer() {
 // ---------- main loop ----------
 const _mat = new Matrix4(), _pos = new Vector3(), _scl = new Vector3();
 let last = performance.now(), hudT = 0, pickT = 0, aimed = null, fps = 60;
-let frameMs = 0;
+let frameMs = 0, audioT = 0;
 function frame(now, manual) {
   if (!manual) requestAnimationFrame(frame);
   const f0 = performance.now();
@@ -1296,6 +1298,7 @@ function frame(now, manual) {
   CAUST.uTime.value = t;
   renderer.render(scene, camera);
 
+  if ((audioT -= dt) < 0) { audioT = 0.5; let wn = false, sn = false; for (const c of mobile) if (c.sp.type === 'whale' && !c.sp.f?.dolphin && !c.sp.f?.sealion && !c.sp.f?.dugong) { const dd = c.p.distanceTo(diver.p); if (dd < 250) { wn = true; if (c.sp.id === 'sperm' && dd < 120) sn = true; } } audio.update(depth, t, wn, sn); }
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
   if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); if (diveOpts.realistic) updateComputer(); }
   if (camMode && (camT -= dt) < 0) {
@@ -1507,15 +1510,61 @@ function analyzeFrame(withStrobe) {
   return { best, stars, tips, others, same };
 }
 
-let actx = null;
-function shutterSound() {
-  try {
-    actx = actx || new AudioContext();
-    const n = actx.sampleRate * 0.14 | 0, buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
+// ---------- sound: all synthesised, no files ----------
+const audio = (() => {
+  let ctx = null, master, muffle, ambGain, ambFilter, verb, nextSong = 0, nextClick = 0;
+  const noise = (secs, brown) => { const n = ctx.sampleRate * secs | 0, b = ctx.createBuffer(1, n, ctx.sampleRate), d = b.getChannelData(0); let last = 0; for (let i = 0; i < n; i++) { const w = Math.random() * 2 - 1; d[i] = brown ? (last = (last + 0.02 * w) / 1.02) * 3.5 : w; } return b; };
+  const env = (g, at, peak, a, hold, r) => { g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(peak, at + a); g.gain.setValueAtTime(peak, at + a + hold); g.gain.exponentialRampToValueAtTime(0.0001, at + a + hold + r); };
+  function init() {
+    if (ctx) { ctx.resume?.(); return; }
+    try { ctx = new AudioContext(); } catch { return; }
+    master = ctx.createGain(); muffle = ctx.createBiquadFilter(); muffle.type = 'lowpass'; muffle.frequency.value = 2400;
+    master.connect(muffle).connect(ctx.destination);
+    verb = ctx.createConvolver(); { const n = ctx.sampleRate * 3 | 0, b = ctx.createBuffer(2, n, ctx.sampleRate); for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3); } verb.buffer = b; }
+    const wet = ctx.createGain(); wet.gain.value = 0.5; verb.connect(wet).connect(master);
+    const src = ctx.createBufferSource(); src.buffer = noise(6, true); src.loop = true;   // the constant wash of the sea
+    ambFilter = ctx.createBiquadFilter(); ambFilter.type = 'lowpass'; ambFilter.frequency.value = 500; ambGain = ctx.createGain(); ambGain.gain.value = 0.2;
+    src.connect(ambFilter).connect(ambGain).connect(master); src.start();
+    apply();
+  }
+  function apply() { if (!ctx) return; master.gain.value = settings.sound ? settings.volume : 0; if (settings.sound) ctx.resume?.(); }
+  function hiss(at, dur, freq, q, peak, dest = master) { const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain(); s.buffer = noise(dur + 0.2); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q; s.connect(f).connect(g).connect(dest); env(g, at, peak, dur * 0.25, dur * 0.45, dur * 0.3); s.start(at); s.stop(at + dur + 0.1); }
+  function inhale(fast) { if (!ctx || !settings.sound) return; const at = ctx.currentTime; hiss(at, fast ? 0.8 : 1.3, 1400, 0.9, 0.25); hiss(at, fast ? 0.8 : 1.3, 3800, 6, 0.03); }
+  function exhale(fast) {   // rumble through the regulator, then the bubbles
+    if (!ctx || !settings.sound) return; const at = ctx.currentTime;
+    hiss(at, fast ? 0.9 : 1.4, 380, 0.7, 0.35);
+    for (let i = 0; i < 14; i++) { const t0 = at + 0.15 + Math.random() * (fast ? 0.9 : 1.4), o = ctx.createOscillator(), g = ctx.createGain(), f = 250 + Math.random() * 500; o.frequency.setValueAtTime(f, t0); o.frequency.exponentialRampToValueAtTime(f * 2.4, t0 + 0.05); env(g, t0, 0.06, 0.005, 0.02, 0.04); o.connect(g); g.connect(master); g.connect(verb); o.start(t0); o.stop(t0 + 0.1); }
+  }
+  function song(near) {   // a humpback-style phrase: slow gliding moans with vibrato, drenched in reverb
+    const at = ctx.currentTime, units = 3 + (Math.random() * 3 | 0);
+    for (let u = 0; u < units; u++) {
+      const t0 = at + u * 1.8, o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain(), base = 90 + Math.random() * 260;
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(base, t0); o.frequency.exponentialRampToValueAtTime(base * (0.6 + Math.random() * 0.9), t0 + 1.5);
+      lfo.frequency.value = 4 + Math.random() * 3; lg.gain.value = base * 0.03; lfo.connect(lg).connect(o.frequency);
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700;
+      env(g, t0, near ? 0.12 : 0.04, 0.4, 0.8, 0.5); o.connect(f).connect(g); g.connect(verb); if (near) g.connect(master);
+      o.start(t0); lfo.start(t0); o.stop(t0 + 1.9); lfo.stop(t0 + 1.9);
+    }
+  }
+  function clicks() { const at = ctx.currentTime; for (let i = 0; i < 8; i++) { const t0 = at + i * (0.4 + Math.random() * 0.3); hiss(t0, 0.02, 2500, 1, 0.3); } }
+  function update(depth, now, whaleNear, spermNear) {
+    if (!ctx || !settings.sound) return;
+    const k = clamp(depth / 200, 0, 1);
+    muffle.frequency.setTargetAtTime(lerp(2400, 700, k), ctx.currentTime, 0.5);   // deeper = more muffled
+    ambGain.gain.setTargetAtTime(lerp(0.22, 0.07, k), ctx.currentTime, 0.5); ambFilter.frequency.setTargetAtTime(lerp(650, 250, k), ctx.currentTime, 0.5);
+    if (now > nextSong && (whaleNear || (depth > 250 && Math.random() < 0.5))) { song(whaleNear); nextSong = now + 20 + Math.random() * 30; }
+    else if (now > nextSong) nextSong = now + 15;
+    if (spermNear && now > nextClick) { clicks(); nextClick = now + 4 + Math.random() * 4; }
+  }
+  function shutter() {
+    if (!ctx || !settings.sound) return;
+    const n = ctx.sampleRate * 0.14 | 0, buf = ctx.createBuffer(1, n, ctx.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < n; i++) { const u = i / n; d[i] = (Math.random() * 2 - 1) * Math.pow(1 - u, 3) * (u < 0.12 || (u > 0.5 && u < 0.62) ? 1 : 0.15); }
-    const src = actx.createBufferSource(), g = actx.createGain(); g.gain.value = 0.35; src.buffer = buf; src.connect(g).connect(actx.destination); src.start();
-  } catch { /* audio is optional */ }
-}
+    const src = ctx.createBufferSource(), g = ctx.createGain(); g.gain.value = 0.5; src.buffer = buf; src.connect(g).connect(master); src.start();
+  }
+  return { init, apply, inhale, exhale, update, shutter };
+})();
+const shutterSound = () => audio.shutter();
 
 async function shoot() {
   if (t - lastShot < 0.6) return; lastShot = t;
@@ -1795,7 +1844,7 @@ for (const [id, key, ev] of [['set-hide', 'hideNames', 'checked'], ['set-sound',
 $('set-reset').onclick = () => { if (!confirm('Reset your logbook, badges and goals? Photos are kept but become unidentified again.')) return; progress.discovered = {}; progress.badges = {}; progress.goals = {}; progress.targets = {}; saveProgress(); for (const p of photos) { p.researched = false; delete p.identified; photoDB.put(p); } toast('Progress reset'); };
 function applySettings() { applyGraphics(); applyAudio(); applyTouch(); renderSitePicker(); }
 // filled in by later features
-function applyGraphics() {} function applyAudio() {} function applyTouch() {}
+function applyGraphics() {} function applyAudio() { audio.apply(); } function applyTouch() {}
 function checkGoals() {} function renderGoalsInto(el) { el.innerHTML = ''; }
 
 
