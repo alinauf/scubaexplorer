@@ -146,14 +146,6 @@
   body.touch #controls { display: none; }
   body.touch #buttons .btn { padding: 6px 10px; font-size: 13px; }
   body.touch #gauge { display: none; }
-  /* dive computer */
-  #computer { padding: 10px 14px; font-variant-numeric: tabular-nums; font-size: 13px; }
-  #computer h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #7fe0ff; }
-  #computer.alarm { border-color: #ff5a5a; box-shadow: 0 0 0 2px rgba(255,90,90,.5); }
-  #computer dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; } #computer dt { color: #8fb8cc; } #computer dd { margin: 0; text-align: right; }
-  .airbar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.12); margin: 2px 0 6px; overflow: hidden; }
-  #c-airbar { height: 100%; background: #4be07a; } #c-airbar.mid { background: #ffd84a; } #c-airbar.low { background: #ff5a5a; }
-  #c-rate.bad { color: #ff5a5a; font-weight: 700; } #c-stop { margin-top: 6px; color: #ffd84a; min-height: 1em; }
   /* dive setup */
   #setup { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 0 0 10px; }
   .seg-ctl { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(3, 16, 31, 0.6); border: 1px solid #1d5a80; }
@@ -172,7 +164,6 @@
   .opt select, .opt input[type=range] { accent-color: #ffd84a; }
   #sum-shots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 0 0 12px; }
   #sum-shots img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 6px; }
-  #sum-warn { padding: 8px 12px; border-radius: 8px; background: rgba(232,112,42,.15); border: 1px solid rgba(232,112,42,.4); font-size: 14px; }
   .row2 { display: flex; gap: 8px; } .row2 .btn { flex: 1; }
 
   /* research station — on land: warm sand and lagoon colours */
@@ -244,10 +235,9 @@
     <p class="sub">Pick a real Maldives dive site and explore in 3D, from the sunlit reef all the way down to the trench floor at 10,935 m. There are <b id="species-count"></b> real species, each at the depths where it actually lives, and you can summon any of them from the fish guide.</p>
     <div id="setup">
       <div class="seg-ctl" id="opt-time"><span>Time</span><button data-v="day">☀️ Day</button><button data-v="night">🌙 Night</button></div>
-      <div class="seg-ctl" id="opt-mode"><span>Mode</span><button data-v="explorer">Explorer</button><button data-v="realistic">Realistic</button></div>
       <div class="setup-btns"><button id="to-land" class="btn">🏝️ Research station</button><button id="open-settings" class="btn">⚙️ Settings</button></div>
     </div>
-    <p id="mode-note"></p>
+    <p id="mode-note">Dive anywhere, all the way to the trench floor. Your gear changes as you go deeper — scuba, then technical trimix, an atmospheric diving suit, a research submersible, and finally a full-ocean-depth sub like James Cameron's DEEPSEA CHALLENGER.</p>
     <div id="sites"></div>
   </div>
 </section>
@@ -260,18 +250,13 @@
     <div id="zone"></div>
     <div id="target" hidden></div>
     <dl class="stats">
+      <dt>Gear</dt><dd id="gear"></dd>
       <dt>Pressure</dt><dd id="pressure"></dd>
       <dt>Water</dt><dd id="temp"></dd>
       <dt>Sunlight</dt><dd id="light"></dd>
       <dt>Animals near you</dt><dd id="nearby"></dd>
       <dt>Current</dt><dd id="cur"></dd>
     </dl>
-  </div>
-  <div id="computer" class="glass" hidden>
-    <h4>Dive computer</h4>
-    <dl><dt>Air</dt><dd id="c-air"></dd></dl><div class="airbar"><div id="c-airbar"></div></div>
-    <dl><dt id="c-ndl-k">No-deco</dt><dd id="c-ndl"></dd><dt>Dive time</dt><dd id="c-time"></dd><dt>Ascent</dt><dd id="c-rate"></dd></dl>
-    <div id="c-stop"></div>
   </div>
   </div>
   <div id="buttons">
@@ -304,7 +289,7 @@
       <li><span class="keys"><kbd>Mouse</kbd> / <kbd>Arrows</kbd></span><span>Look around. Click the water to lock the mouse (<kbd>Esc</kbd> releases it), drag to look, or use the arrow keys.</span></li>
       <li><span class="keys"><kbd>W A S D</kbd></span><span>Swim forward, back and sideways in the direction you're looking</span></li>
       <li><span class="keys"><kbd>Space</kbd> <kbd>C</kbd></span><span>Rise and sink</span></li>
-      <li><span class="keys"><kbd>Shift</kbd></span><span>Dive fast (gets faster the deeper you are)</span></li>
+      <li><span class="keys"><kbd>Shift</kbd></span><span>Dive fast (gets faster the deeper you are). Your gear changes as you go deeper — technical trimix below 40 m, a hardsuit below 330 m, a research sub below 700 m and a full-ocean-depth sub below 6,500 m.</span></li>
       <li><span class="keys"><kbd>Click</kbd> / <kbd>E</kbd></span><span>Learn about the animal in your crosshair</span></li>
       <li><span class="keys"><kbd>F</kbd></span><span>Raise or lower your underwater camera. Click or press <kbd>Enter</kbd> to take a photo; scroll or <kbd>+</kbd>/<kbd>−</kbd> to zoom. The strobe fires automatically once it gets dim.</span></li>
       <li><span class="keys"><kbd>P</kbd></span><span>Photo log: every shot, graded ★–★★★. Subjects stay unidentified until you research them on land.</span></li>
@@ -402,7 +387,6 @@
     <h2 id="sum-title"></h2>
     <dl id="sum-meta" style="margin-top:12px"></dl>
     <div id="sum-shots"></div>
-    <p id="sum-warn" hidden></p>
     <div class="row2"><button id="sum-land" class="btn primary">🏝️ Research your photos</button><button id="sum-sites" class="btn">Dive sites</button></div>
   </div>
 </div>

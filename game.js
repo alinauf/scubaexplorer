@@ -845,6 +845,7 @@ const haloS = points(1500, 0.6, 0xffffff, { colors: true, add: true }), haloL = 
 // ---------- diver: articulated model with neoprene, BCD, tank, regulator, hoses and flexing fins ----------
 const diverModel = (() => {
   const grp = new THREE.Group(); grp.rotation.order = 'YZX';
+  const scuba = new THREE.Group(), single = new THREE.Group(); grp.add(scuba); scuba.add(single);   // scuba diver; `single` = the recreational tank
   const grain = (() => { const cv = makeCanvas(128, 128), g = cv.getContext('2d'), R = rng(21); g.fillStyle = '#808080'; g.fillRect(0, 0, 128, 128); for (let i = 0; i < 2600; i++) { const v = 100 + R() * 60 | 0; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(R() * 128, R() * 128, 1.5, 1.5); } const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 6); return t; })();
   const std = (color, rough, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: rough, ...extra });
   const neo = std(0x121417, 0.85, { bumpMap: grain, bumpScale: 0.8 }), neoBlue = std(0x1d6fb8, 0.8, { bumpMap: grain, bumpScale: 0.8 });
@@ -853,9 +854,9 @@ const diverModel = (() => {
   const finMat = std(0x1668b0, 0.4, { side: THREE.DoubleSide }), finTip = std(0xf2d020, 0.4, { side: THREE.DoubleSide });
   const glass = new THREE.MeshPhysicalMaterial({ color: 0xaee4ff, roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.4, clearcoat: 1, clearcoatRoughness: 0.02 });
   const lens = std(0xfff6dd, 0.2, { emissive: 0xfff2cc, emissiveIntensity: 0 }), yellow = std(0xf2c418, 0.45);
-  const add = (geo, mat, parent = grp, m = null) => { const o = new THREE.Mesh(geo, mat); if (m) o.applyMatrix4(m); parent.add(o); return o; };
+  const add = (geo, mat, parent = scuba, m = null) => { const o = new THREE.Mesh(geo, mat); if (m) o.applyMatrix4(m); parent.add(o); return o; };
   const capsule = (r, len) => { const g = new THREE.CapsuleGeometry(r, len, 6, 14); g.rotateZ(Math.PI / 2); return g; };  // along x
-  const along = (from, to, r0, r1, mat, parent = grp) => { // tapered segment between two points
+  const along = (from, to, r0, r1, mat, parent = scuba) => { // tapered segment between two points
     const d = to.clone().sub(from), g = new THREE.CylinderGeometry(r1, r0, d.length(), 14); g.translate(0, d.length() / 2, 0);
     g.applyQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), d.normalize())); g.translate(from.x, from.y, from.z); return add(g, mat, parent);
   };
@@ -868,11 +869,11 @@ const diverModel = (() => {
   torso(0.1, 0.62, 1.09, bcd);                        // BCD jacket
   torso(0.32, 0.4, 1.12, neoBlue);                    // BCD trim band
   torso(0.8, 0.88, 1.08, web);                        // weight belt
-  add(new THREE.BoxGeometry(0.05, 0.03, 0.07), steel, grp, M(-0.12, -0.125, 0));   // belt buckle
-  for (const s of [-1, 1]) { add(sphere(14), neo, grp, M(0.37, 0.0, s * 0.19, 0, 0, 0, 0.085)); add(new THREE.BoxGeometry(0.2, 0.012, 0.05), neoBlue, grp, M(0.3, 0.155, s * 0.1)); }
+  add(new THREE.BoxGeometry(0.05, 0.03, 0.07), steel, scuba, M(-0.12, -0.125, 0));   // belt buckle
+  for (const s of [-1, 1]) { add(sphere(14), neo, scuba, M(0.37, 0.0, s * 0.19, 0, 0, 0, 0.085)); add(new THREE.BoxGeometry(0.2, 0.012, 0.05), neoBlue, scuba, M(0.3, 0.155, s * 0.1)); }
   // neck, head, hood, mask, regulator
-  add(capsule(0.055, 0.08), neo, grp, M(0.49, 0.04, 0));
-  const head = new THREE.Group(); head.position.set(0.61, 0.07, 0); head.rotation.z = -0.3; grp.add(head);
+  add(capsule(0.055, 0.08), neo, scuba, M(0.49, 0.04, 0));
+  const head = new THREE.Group(); head.position.set(0.61, 0.07, 0); head.rotation.z = -0.3; scuba.add(head);
   add(sphere(20), neo, head, M(0, 0, 0, 0, 0, 0, 0.12, 0.115, 0.105));
   add(sphere(12), skin, head, M(0.085, -0.055, 0, 0, 0, 0, 0.04, 0.045, 0.065));
   add(new THREE.CylinderGeometry(0.068, 0.072, 0.05, 28), rubber, head, M(0.1, 0.015, 0, 0, 0, Math.PI / 2, 1, 1, 1.5));
@@ -881,33 +882,33 @@ const diverModel = (() => {
   add(new THREE.CylinderGeometry(0.03, 0.034, 0.07, 16), rubber, head, M(0.13, -0.075, 0.02, Math.PI / 2, 0, 0));
   add(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 16), std(0x6a6f76, 0.4), head, M(0.16, -0.075, 0.02, 0, 0, Math.PI / 2));
   // tank with valve, first stage and bands
-  add(new THREE.CylinderGeometry(0.09, 0.09, 0.52, 28), tankMat, grp, M(0.0, 0.235, 0, 0, 0, Math.PI / 2));
-  for (const x of [0.26, -0.26]) add(sphere(20), tankMat, grp, M(x, 0.235, 0, 0, 0, 0, 0.05, 0.09, 0.09));
-  for (const x of [0.12, -0.1]) add(new THREE.CylinderGeometry(0.095, 0.095, 0.035, 28), web, grp, M(x, 0.235, 0, 0, 0, Math.PI / 2));
-  add(new THREE.CylinderGeometry(0.022, 0.026, 0.07, 14), steel, grp, M(0.33, 0.235, 0, 0, 0, Math.PI / 2));
-  add(new THREE.CylinderGeometry(0.032, 0.032, 0.07, 14), steel, grp, M(0.37, 0.24, 0, Math.PI / 2, 0, 0));
-  add(new THREE.TorusGeometry(0.025, 0.007, 6, 14), rubber, grp, M(0.37, 0.28, 0, Math.PI / 2, 0, 0));
+  add(new THREE.CylinderGeometry(0.09, 0.09, 0.52, 28), tankMat, single, M(0.0, 0.235, 0, 0, 0, Math.PI / 2));
+  for (const x of [0.26, -0.26]) add(sphere(20), tankMat, single, M(x, 0.235, 0, 0, 0, 0, 0.05, 0.09, 0.09));
+  for (const x of [0.12, -0.1]) add(new THREE.CylinderGeometry(0.095, 0.095, 0.035, 28), web, single, M(x, 0.235, 0, 0, 0, Math.PI / 2));
+  add(new THREE.CylinderGeometry(0.022, 0.026, 0.07, 14), steel, single, M(0.33, 0.235, 0, 0, 0, Math.PI / 2));
+  add(new THREE.CylinderGeometry(0.032, 0.032, 0.07, 14), steel, scuba, M(0.37, 0.24, 0, Math.PI / 2, 0, 0));
+  add(new THREE.TorusGeometry(0.025, 0.007, 6, 14), rubber, scuba, M(0.37, 0.28, 0, Math.PI / 2, 0, 0));
   hose([[0.37, 0.24, 0.035], [0.44, 0.2, 0.15], [0.56, 0.06, 0.15], [0.7, -0.03, 0.05], [0.73, -0.05, 0.02]], 0.011, hoseMat);           // regulator
   hose([[0.37, 0.24, -0.035], [0.43, 0.22, -0.17], [0.34, 0.08, -0.24], [0.22, -0.02, -0.21]], 0.014, std(0x3a3e44, 0.5));                // inflator
   hose([[0.36, 0.23, 0.04], [0.3, 0.14, 0.22], [0.1, -0.02, 0.24], [-0.02, -0.12, 0.2]], 0.01, hoseMat);                                   // gauge
-  add(new THREE.CylinderGeometry(0.04, 0.04, 0.035, 24), rubber, grp, M(-0.04, -0.14, 0.19, 0.4, 0, 0));
-  add(new THREE.CylinderGeometry(0.032, 0.032, 0.004, 24), std(0xe8eef2, 0.3, { emissive: 0x335544, emissiveIntensity: 0.2 }), grp, M(-0.04, -0.158, 0.197, 0.4, 0, 0));
-  add(new THREE.CylinderGeometry(0.03, 0.034, 0.06, 14), yellow, grp, M(0.18, -0.14, 0.07, Math.PI / 2, 0, 0));    // octopus (spare regulator)
+  add(new THREE.CylinderGeometry(0.04, 0.04, 0.035, 24), rubber, scuba, M(-0.04, -0.14, 0.19, 0.4, 0, 0));
+  add(new THREE.CylinderGeometry(0.032, 0.032, 0.004, 24), std(0xe8eef2, 0.3, { emissive: 0x335544, emissiveIntensity: 0.2 }), scuba, M(-0.04, -0.158, 0.197, 0.4, 0, 0));
+  add(new THREE.CylinderGeometry(0.03, 0.034, 0.06, 14), yellow, scuba, M(0.18, -0.14, 0.07, Math.PI / 2, 0, 0));    // octopus (spare regulator)
   // arms: left tucked under the chest, right holding the torch forward
   const arm = (s, elbow, hand) => {
     const sh = new Vector3(0.37, -0.02, s * 0.2), el = new Vector3(...elbow), wr = new Vector3(...hand);
-    along(sh, el, 0.052, 0.045, neo); add(sphere(12), neo, grp, M(el.x, el.y, el.z, 0, 0, 0, 0.046));
-    along(el, wr, 0.044, 0.036, neo); add(sphere(12), rubber, grp, M(wr.x + 0.035, wr.y, wr.z, 0, 0, 0, 0.05, 0.03, 0.042));
+    along(sh, el, 0.052, 0.045, neo); add(sphere(12), neo, scuba, M(el.x, el.y, el.z, 0, 0, 0, 0.046));
+    along(el, wr, 0.044, 0.036, neo); add(sphere(12), rubber, scuba, M(wr.x + 0.035, wr.y, wr.z, 0, 0, 0, 0.05, 0.03, 0.042));
     return wr;
   };
   arm(-1, [0.3, -0.24, -0.2], [0.5, -0.2, -0.06]);
   const wr = arm(1, [0.52, -0.2, 0.26], [0.74, -0.16, 0.2]);
-  add(new THREE.CylinderGeometry(0.026, 0.022, 0.17, 18), std(0x15171a, 0.35, { metalness: 0.4 }), grp, M(wr.x + 0.07, wr.y + 0.01, wr.z, 0, 0, -Math.PI / 2));
-  const bulb = add(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 18), lens, grp, M(wr.x + 0.16, wr.y + 0.01, wr.z, 0, 0, -Math.PI / 2));
+  add(new THREE.CylinderGeometry(0.026, 0.022, 0.17, 18), std(0x15171a, 0.35, { metalness: 0.4 }), scuba, M(wr.x + 0.07, wr.y + 0.01, wr.z, 0, 0, -Math.PI / 2));
+  add(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 18), lens, scuba, M(wr.x + 0.16, wr.y + 0.01, wr.z, 0, 0, -Math.PI / 2));
   // legs: hip → knee → ankle, each a pivot; fins flex in two parts
   const finShape = (w0, w1, len) => { const s = new THREE.Shape(); s.moveTo(0, -w0); s.lineTo(-len, -w1); s.quadraticCurveTo(-len - 0.03, 0, -len, w1); s.lineTo(0, w0); s.lineTo(0, -w0); const g = new THREE.ShapeGeometry(s); g.rotateX(Math.PI / 2); return g; };
   const legs = [-1, 1].map(s => {
-    const hip = new THREE.Group(); hip.position.set(-0.33, -0.01, s * 0.085); grp.add(hip);
+    const hip = new THREE.Group(); hip.position.set(-0.33, -0.01, s * 0.085); scuba.add(hip);
     add(capsule(0.072, 0.3), neo, hip, M(-0.2, 0, 0));
     const knee = new THREE.Group(); knee.position.set(-0.4, 0, 0); hip.add(knee);
     add(capsule(0.058, 0.3), neo, knee, M(-0.19, 0, 0));
@@ -926,6 +927,86 @@ const diverModel = (() => {
   const beamGeo = new THREE.ConeGeometry(4.5, 18, 32, 1, true); beamGeo.translate(0, -9, 0);
   const beam = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({ color: 0xfff4dd, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, alphaMap: shaftTex, side: THREE.DoubleSide, fog: false }));
   beam.position.set(wr.x + 0.17, wr.y + 0.01, wr.z); beam.rotation.z = Math.PI / 2; grp.add(beam);
+  // ----- technical diver kit (40–330 m): twin back tanks + stage cylinders of trimix/deco gas -----
+  const tech = new THREE.Group(); scuba.add(tech);
+  const alu = std(0xc9ced4, 0.3, { metalness: 0.7 });
+  for (const z of [-0.085, 0.085]) {
+    add(new THREE.CylinderGeometry(0.08, 0.08, 0.56, 24), std(0x9aa2aa, 0.28, { metalness: 0.75 }), tech, M(0.0, 0.225, z, 0, 0, Math.PI / 2));
+    for (const x of [0.28, -0.28]) add(sphere(16), std(0x9aa2aa, 0.28, { metalness: 0.75 }), tech, M(x, 0.225, z, 0, 0, 0, 0.045, 0.08, 0.08));
+    add(new THREE.CylinderGeometry(0.02, 0.024, 0.08, 12), steel, tech, M(0.35, 0.225, z, 0, 0, Math.PI / 2));
+  }
+  add(new THREE.CylinderGeometry(0.016, 0.016, 0.2, 10), steel, tech, M(0.38, 0.225, 0, Math.PI / 2, 0, 0));   // isolation manifold
+  for (const x of [0.12, -0.12]) add(new THREE.BoxGeometry(0.04, 0.2, 0.36), web, tech, M(x, 0.2, 0));   // tank bands
+  const stageCols = [0xe8e8e8, 0xf2c418];   // stage/deco cylinders are clipped along the diver's sides, labelled with their gas
+  for (const s of [-1, 1]) for (const k of [0, 1]) {
+    const z = s * (0.24 + k * 0.1), y = -0.06 - k * 0.07;
+    add(new THREE.CylinderGeometry(0.06, 0.06, 0.62, 18), alu, tech, M(-0.02, y, z, 0, 0, Math.PI / 2));
+    add(new THREE.CylinderGeometry(0.061, 0.061, 0.08, 18), std(stageCols[k], 0.5), tech, M(0.18, y, z, 0, 0, Math.PI / 2));
+    add(new THREE.CylinderGeometry(0.018, 0.02, 0.08, 10), steel, tech, M(0.34, y, z, 0, 0, Math.PI / 2));
+  }
+  // ----- atmospheric diving suit (330–700 m): a one-person hardsuit at surface pressure, upright, with thrusters -----
+  const ads = new THREE.Group(); grp.add(ads);
+  const hard = std(0xf2b705, 0.32, { metalness: 0.25 }), joint = std(0x4f555c, 0.35, { metalness: 0.7 }), dark = std(0x1b1d20, 0.5);
+  add(sphere(24), hard, ads, M(0, 0.15, 0, 0, 0, 0, 0.42, 0.55, 0.44));
+  add(new THREE.CylinderGeometry(0.36, 0.32, 0.4, 24), hard, ads, M(0, -0.5, 0));
+  add(new THREE.TorusGeometry(0.38, 0.06, 10, 28), joint, ads, M(0, -0.28, 0, Math.PI / 2, 0, 0));
+  add(new THREE.TorusGeometry(0.25, 0.045, 10, 28), joint, ads, M(0.04, 0.63, 0, Math.PI / 2, 0, 0));
+  add(sphere(24), glass, ads, M(0.05, 0.84, 0, 0, 0, 0, 0.27));
+  add(sphere(16), neo, ads, M(0.02, 0.82, 0, 0, 0, 0, 0.13, 0.15, 0.12));
+  add(sphere(10), skin, ads, M(0.11, 0.8, 0, 0, 0, 0, 0.05, 0.07, 0.08));
+  for (const s of [-1, 1]) {
+    const sh = new Vector3(0, 0.42, s * 0.46), el = new Vector3(0.22, 0.02, s * 0.58), hd = new Vector3(0.5, -0.12, s * 0.5);
+    add(sphere(16), joint, ads, M(sh.x, sh.y, sh.z, 0, 0, 0, 0.15));
+    along(sh, el, 0.12, 0.11, hard, ads); add(sphere(14), joint, ads, M(el.x, el.y, el.z, 0, 0, 0, 0.12));
+    along(el, hd, 0.1, 0.09, hard, ads);
+    for (const k of [-1, 1]) add(new THREE.BoxGeometry(0.14, 0.035, 0.05), joint, ads, M(hd.x + 0.08, hd.y + k * 0.04, hd.z, 0, 0, k * 0.4));   // claw
+    const hp = new Vector3(0.02, -0.68, s * 0.2), kn = new Vector3(0.06, -1.08, s * 0.23), an = new Vector3(0, -1.46, s * 0.23);
+    add(sphere(14), joint, ads, M(hp.x, hp.y, hp.z, 0, 0, 0, 0.14));
+    along(hp, kn, 0.13, 0.12, hard, ads); add(sphere(14), joint, ads, M(kn.x, kn.y, kn.z, 0, 0, 0, 0.12));
+    along(kn, an, 0.11, 0.1, hard, ads); add(new THREE.BoxGeometry(0.36, 0.14, 0.2), dark, ads, M(an.x + 0.08, an.y - 0.06, an.z));
+    add(new THREE.CylinderGeometry(0.06, 0.07, 0.14, 14), dark, ads, M(0.2, 0.55, s * 0.3, 0, 0, -Math.PI / 2));   // shoulder lamps
+    add(new THREE.CylinderGeometry(0.055, 0.055, 0.01, 14), lens, ads, M(0.28, 0.55, s * 0.3, 0, 0, -Math.PI / 2));
+    add(new THREE.CylinderGeometry(0.1, 0.1, 0.3, 16), dark, ads, M(-0.58, 0.05, s * 0.32, 0, 0, Math.PI / 2));   // thrusters
+    add(new THREE.TorusGeometry(0.13, 0.025, 8, 20), joint, ads, M(-0.62, 0.05, s * 0.32, 0, Math.PI / 2, 0));
+  }
+  add(new THREE.BoxGeometry(0.3, 0.7, 0.62), joint, ads, M(-0.42, 0.1, 0));   // life-support & thruster pod
+  // ----- research submersible (700–6,500 m), modelled on WHOI's Alvin: white hull, red sail, arms and sample basket -----
+  const alvin = new THREE.Group(); grp.add(alvin);
+  const white = std(0xf1f1ec, 0.35), red = std(0xc8321e, 0.45), grey = std(0x6c7278, 0.4, { metalness: 0.6 });
+  add(new THREE.CapsuleGeometry(1.2, 4.4, 10, 28), white, alvin, M(0, 0, 0, 0, 0, Math.PI / 2, 1, 1, 0.9));
+  add(new THREE.BoxGeometry(1.6, 1.1, 0.36), red, alvin, M(0.3, 1.45, 0));
+  add(new THREE.CylinderGeometry(0.18, 0.18, 0.4, 16), red, alvin, M(0.3, 2.05, 0));
+  add(new THREE.TorusGeometry(1.2, 0.06, 8, 36), red, alvin, M(1.9, 0, 0, 0, Math.PI / 2, 0, 1, 1, 0.9));
+  add(sphere(24), grey, alvin, M(2.9, -0.35, 0, 0, 0, 0, 0.9, 0.85, 0.85));   // personnel sphere
+  for (const [y, z] of [[-0.3, 0], [-0.4, 0.45], [-0.4, -0.45]]) add(new THREE.CylinderGeometry(0.1, 0.1, 0.04, 18), glass, alvin, M(3.78, y, z, 0, 0, Math.PI / 2));
+  add(new THREE.BoxGeometry(1.2, 0.35, 1.8), grey, alvin, M(3.1, -1.3, 0));   // sample basket
+  for (const s of [-1, 1]) {
+    along(new Vector3(2.8, -0.8, s * 0.7), new Vector3(3.6, -0.9, s * 0.8), 0.08, 0.07, grey, alvin); along(new Vector3(3.6, -0.9, s * 0.8), new Vector3(4.2, -1.15, s * 0.55), 0.07, 0.05, grey, alvin);
+    add(new THREE.BoxGeometry(5.2, 0.12, 0.14), grey, alvin, M(0, -1.4, s * 0.85));   // skids
+    add(new THREE.CylinderGeometry(0.28, 0.28, 0.5, 18), dark, alvin, M(-3.1, 0.35, s * 1.05, 0, 0, Math.PI / 2));   // thrusters
+    add(new THREE.TorusGeometry(0.34, 0.06, 8, 22), grey, alvin, M(-3.3, 0.35, s * 1.05, 0, Math.PI / 2, 0));
+  }
+  add(new THREE.CylinderGeometry(0.3, 0.3, 0.5, 18), dark, alvin, M(-3.5, -0.3, 0, 0, 0, Math.PI / 2));
+  for (let i = 0; i < 5; i++) { const z = (i - 2) * 0.38; add(new THREE.CylinderGeometry(0.1, 0.12, 0.2, 14), dark, alvin, M(3.35, 0.75, z, 0, 0, -Math.PI / 2)); add(new THREE.CylinderGeometry(0.09, 0.09, 0.01, 14), lens, alvin, M(3.46, 0.75, z, 0, 0, -Math.PI / 2)); }
+  // ----- full-ocean-depth submersible (6,500 m+), modelled on DEEPSEA CHALLENGER: a 7.3 m lime-green "vertical torpedo" -----
+  const dsc = new THREE.Group(); grp.add(dsc);   // origin at the pilot sphere; the body towers above it
+  const lime = std(0x9bcf2a, 0.4), dscGrey = std(0x3c4046, 0.4, { metalness: 0.7 });
+  add(new THREE.CapsuleGeometry(0.62, 5.4, 10, 28), lime, dsc, M(-0.2, 3.3, 0, 0, 0, 0, 1.55, 1, 0.8));
+  add(new THREE.BoxGeometry(0.06, 5.2, 1.02), std(0xf4f4f0, 0.4), dsc, M(0.78, 3.3, 0));   // white stripe
+  add(sphere(28), dscGrey, dsc, M(0.1, 0, 0, 0, 0, 0, 0.72));   // steel pilot sphere, 1.09 m inside
+  add(new THREE.CylinderGeometry(0.1, 0.1, 0.04, 18), glass, dsc, M(0.8, 0.05, 0, 0, 0, Math.PI / 2));   // the single small viewport
+  add(new THREE.BoxGeometry(0.18, 2.6, 0.34), dark, dsc, M(1.2, 1.5, 0));   // LED light tower
+  add(new THREE.BoxGeometry(0.02, 2.4, 0.26), lens, dsc, M(1.3, 1.5, 0));
+  along(new Vector3(0.6, 1.5, 0), new Vector3(1.15, 1.5, 0), 0.05, 0.05, dscGrey, dsc);
+  for (const y of [2.2, 4.3]) for (const s of [-1, 1]) { add(new THREE.CylinderGeometry(0.2, 0.2, 0.36, 16), dark, dsc, M(-0.2, y, s * 0.72, Math.PI / 2, 0, 0)); add(new THREE.TorusGeometry(0.24, 0.05, 8, 20), dscGrey, dsc, M(-0.2, y, s * 0.9, 0, 0, 0)); }
+  for (const s of [-1, 1]) add(new THREE.BoxGeometry(0.5, 0.3, 0.3), dscGrey, dsc, M(-0.3, -0.7, s * 0.35));   // steel ballast weights
+  const GEAR_BEAM = { rec: [wr.x + 0.17, wr.y + 0.01, wr.z, 1], tech: [wr.x + 0.17, wr.y + 0.01, wr.z, 1], ads: [0.3, 0.55, 0.3, 1.3], alvin: [3.5, 0.75, 0, 2.2], dsc: [1.35, 1.5, 0, 2.6] };
+  function setGear(id) {
+    scuba.visible = id === 'rec' || id === 'tech'; tech.visible = id === 'tech'; single.visible = id === 'rec';
+    ads.visible = id === 'ads'; alvin.visible = id === 'alvin'; dsc.visible = id === 'dsc';
+    const [x, y, z, k] = GEAR_BEAM[id]; beam.position.set(x, y, z); beam.scale.set(k, 1 + (k - 1) * 0.5, k);
+  }
+
   grp.traverse(o => { if (o.isMesh && o !== beam) o.castShadow = true; });
   scene.add(grp);
   function animate(kick, time, torchK) {   // flutter kick: hips swing, knees bend on the up-stroke, fins lag and flex
@@ -939,8 +1020,36 @@ const diverModel = (() => {
     head.rotation.y = Math.sin(time * 0.4) * 0.12;
     lens.emissiveIntensity = torchK * 3; beam.material.opacity = torchK * 0.07;
   }
-  return { grp, animate };
+  setGear('rec');
+  return { grp, animate, setGear };
 })();
+
+// ---------- gear changes with depth (real equipment for each depth range) ----------
+const GEAR = [
+  { id: 'rec', upTo: 40, icon: '🤿', name: 'Recreational scuba', cam: [4.2, 1.2], fp: [0.35, 0.1], margin: 0.9, lamp: 1, scuba: true,
+    note: 'One tank of air. 40 m is the recreational limit — deeper than that, air becomes narcotic and then toxic to breathe.' },
+  { id: 'tech', upTo: 330, icon: '🧪', name: 'Technical trimix diver', cam: [4.4, 1.3], fp: [0.35, 0.1], margin: 1, lamp: 1.2, scuba: true,
+    note: 'Twin back tanks plus stage cylinders of trimix — oxygen, nitrogen and helium. The deepest scuba dive on record is 332 m (Ahmed Gabr, 2014): 12 minutes down, nearly 14 hours of decompression back up.' },
+  { id: 'ads', upTo: 700, icon: '🦾', name: 'Atmospheric diving suit', cam: [5, 1.6], fp: [0.35, 0.82], margin: 1.4, lamp: 1.5, upright: true, hum: 0.04,
+    note: 'A one-person "hardsuit" that keeps you at surface pressure, so there is no decompression. Suits like the Newtsuit and Exosuit are rated to about 300 m; the deepest-rated reach around 700 m.' },
+  { id: 'alvin', upTo: 6500, icon: '🛸', name: 'Research submersible', cam: [12, 3.5], fp: [3.9, -0.3], margin: 2.3, lamp: 2.5, hum: 0.08, pitchK: 0.4,
+    note: 'A three-person research sub like WHOI’s Alvin, rated to 6,500 m after its 2022 upgrade — deep enough to reach 99% of the seafloor.' },
+  { id: 'dsc', upTo: Infinity, icon: '🚀', name: 'Full-ocean-depth submersible', cam: [11, 3], fp: [0.9, 0.05], margin: 1.6, lamp: 3, upright: true, hum: 0.1,
+    note: 'Modelled on DEEPSEA CHALLENGER, the 7.3 m lime-green "vertical torpedo" James Cameron piloted solo to 10,908 m in the Challenger Deep on 26 March 2012. Its pilot sphere is only 1.09 m across.' },
+];
+const gearAt = d => GEAR.findIndex(g => d < g.upTo);
+let gearIdx = 0;
+const gear = () => GEAR[gearIdx];
+function updateGear(depth, force) {   // switch with a little hysteresis so it doesn't flicker at the boundary
+  let g = gearIdx;
+  while (g < GEAR.length - 1 && depth > GEAR[g].upTo + 3) g++;
+  while (g > 0 && depth < GEAR[g - 1].upTo - 3) g--;
+  if (force) g = gearAt(depth);
+  if (g === gearIdx && !force) return;
+  gearIdx = g; const G = GEAR[g];
+  diverModel.setGear(G.id); $('gear').textContent = `${G.icon} ${G.name}`;
+  if (!force) toast(`${G.icon} ${G.name} — ${G.note}`, 11000);
+}
 
 // ---------- state ----------
 const diver = { p: new Vector3(), v: new Vector3(), yaw: Math.PI, pitch: -0.15, kick: 0, breath: 0 };
@@ -958,21 +1067,19 @@ const kindName = sp => (sp.kind || (CORAL.has(sp.type) ? 'coral' : KIND[sp.type]
 const known = sp => !settings.hideNames || !!progress.discovered[sp.id];   // research mode hides names until you identify a photo
 const label = sp => known(sp) ? sp.name : `Unknown ${kindName(sp)}`;
 const an = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w, cap = w => w[0].toUpperCase() + w.slice(1);
-const diveOpts = { night: false, realistic: false };
-let diveStats = { start: 0, maxDepth: 0, warnings: [], extra: [] };
+const diveOpts = { night: false };
+let diveStats = { start: 0, maxDepth: 0 };
 
 function startDive(s) {
   site = s; diveId = Date.now(); audio.init(); { const [v, deg] = s.current || [0, 0], a = deg * Math.PI / 180; curBase.set(Math.sin(a) * v, 0, -Math.cos(a) * v); } dayLight = diveOpts.night ? 0.012 : 1;
-CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
-  $('computer').hidden = !diveOpts.realistic;
+CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0 };
   pool = species.filter(sp => !sp.host);
   hosts = species.filter(sp => sp.host);
   cells = new Map(); summoned = [];
-  diver.p.set(edgeX(0) + 7, diveOpts.realistic ? -0.5 : -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;   // realistic dives start at the surface
-  resetComputer();
+  diver.p.set(edgeX(0) + 7, -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;
   $('site-name').textContent = `${s.name} · ${s.area}${diveOpts.night ? ' · 🌙 night' : ''}`;
   $('picker').hidden = true; $('land').hidden = true; $('hud').hidden = false; closeCard();
-  updateTiles(true); updateTarget(); applyTouch();
+  updateTiles(true); updateTarget(); applyTouch(); updateGear(6, true);
   if (!startDive.seen) { startDive.seen = 1; $('help').hidden = false; }
 }
 
@@ -1063,7 +1170,7 @@ function updateCells() {
 
 let anyDead = false, lastCatchToast = -9;
 function kill(c) { c.dead = true; anyDead = true; }
-function toast(msg) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; $('toasts').prepend(el); setTimeout(() => el.remove(), 4500); while ($('toasts').children.length > 4) $('toasts').lastChild.remove(); }
+function toast(msg, ms = 4500) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; $('toasts').prepend(el); setTimeout(() => el.remove(), ms); while ($('toasts').children.length > 4) $('toasts').lastChild.remove(); }
 const angLerp = (a, b, k) => { const d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a + d * k; };
 const _des = new Vector3(), _to = new Vector3(), UP = new Vector3(0, 1, 0);
 function stepCreature(c, dt, dSpeed) {
@@ -1172,52 +1279,17 @@ function stepDiver(dt) {
   diver.yaw -= lx * dt * 1.8; diver.pitch = clamp(diver.pitch + ly * dt * 1.3, -1.45, 1.45);   // arrow keys look around
   const vt = (keys.Space || touch.up ? 1 : 0) - (keys.KeyC || keys.ControlLeft || touch.down ? 1 : 0);
   const turbo = keys.ShiftLeft || keys.ShiftRight || touch.fast, depth = -diver.p.y;
-  const max = diveOpts.realistic ? (turbo ? 2.2 : 1.1) : turbo ? 12 + depth * 0.05 : 1.8;   // explorer turbo scales with depth so the trenches are reachable
+  const max = turbo ? 12 + depth * 0.05 : 1.8;   // turbo scales with depth so the trenches are reachable
   _des.set(0, 0, 0).addScaledVector(f, fw).addScaledVector(r, st).add(_v.set(0, vt, 0));
   if (_des.lengthSq() > 0) _des.setLength(max);
   diver.v.lerp(_des, Math.min(1, dt * (turbo ? 3 : 2.2)));
   diver.p.addScaledVector(diver.v, dt).addScaledVector(currentAt(diver.p), dt);
-  pushOut(diver.p, 0.9);
+  pushOut(diver.p, gear().margin);
   diver.kick += dt * (1.5 + diver.v.length() * (turbo ? 0.3 : 2.5));
   const prevBreath = diver.breath;
+  if (!gear().scuba) return;   // suits and subs don't breathe bubbles
   if (prevBreath > 1.9 && (diver.breath - dt) <= 1.9 && depth > 1) audio.inhale(turbo);
-  if ((diver.breath -= dt) < 0 && depth > 1) { diver.breath = turbo ? 2.4 : 3.5; audio.exhale(turbo); if (depth > 1.5) for (let i = 0; i < 8; i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
-}
-
-// ---------- dive computer (realistic mode) ----------
-// Air: 11.1 L tank at 200 bar, 20 L/min at the surface × ambient pressure. No-decompression limits: recreational air tables.
-const NDL = [[10, 219], [12, 147], [14, 98], [16, 72], [18, 56], [20, 45], [22, 37], [25, 29], [30, 20], [35, 14], [40, 9], [42, 8], [45, 5], [50, 3], [56, 2], [1e9, 1]];
-const ndlAt = d => { if (d < 10) return Infinity; for (let i = 1; i < NDL.length; i++) if (d <= NDL[i][0]) return lerp(NDL[i - 1][1], NDL[i][1], (d - NDL[i - 1][0]) / (NDL[i][0] - NDL[i - 1][0])); return 1; };
-let comp = null;
-function resetComputer() { comp = { air: 200, load: 0, safety: 0, fastAscent: 0, warned: {}, outOfAir: false, lastD: -diver.p.y }; }
-function warnOnce(key, msg) { if (!comp.warned[key]) { comp.warned[key] = true; toast(`⚠️ ${msg}`); diveStats.warnings.push(msg); } }
-function stepComputer(dt) {
-  const d = -diver.p.y, amb = 1 + d / 10, moving = diver.v.length(), turbo = keys.ShiftLeft || keys.ShiftRight || touch.fast;
-  comp.air = Math.max(0, comp.air - (20 / 60) * amb * (turbo ? 1.8 : moving > 0.3 ? 1.25 : 1) * dt / 11.1);
-  const ndl = ndlAt(d);
-  if (ndl < Infinity) comp.load += dt / 60 / ndl; else comp.load = Math.max(comp.load > 1 ? 1 : 0, comp.load - dt / 60 / 45);   // slow off-gassing in the shallows
-  if (comp.load > 1 && d >= 2.5 && d <= 6.5) comp.load = Math.max(1, comp.load - dt / 60 / 30 * 2);   // a decompression stop pays the debt down
-  if (comp.load > 1 && d < 2.5 && comp.load > 1.01) warnOnce('deco', 'Surfaced with a decompression obligation — high risk of decompression sickness');
-  if (diveStats.maxDepth > 10 && d >= 2.5 && d <= 6.5) comp.safety += dt;
-  if (d < 1.5 && diveStats.maxDepth > 10 && comp.safety < 180) warnOnce('safety', 'Skipped the 3-minute safety stop at 5 m');
-  const rate = (comp.lastD - d) / dt * 60; comp.lastD = d; comp.rate = lerp(comp.rate || 0, rate, 0.1);   // m/min, + means ascending
-  if (comp.rate > 9 && d > 3) { comp.fastAscent += dt; if (comp.fastAscent > 2) warnOnce('ascent', 'Ascended faster than 9 m/min'); } else comp.fastAscent = 0;
-  if (d > 30) warnOnce('narcosis', 'Below 30 m: nitrogen narcosis can cloud your judgement');
-  if (d > 40) warnOnce('rec', 'Below 40 m: beyond the recreational depth limit');
-  if (d > 56) warnOnce('ox', 'Below 56 m: oxygen toxicity risk when breathing air');
-  if (comp.air < 50) warnOnce('reserve', 'Air at 50 bar — reserve. Start your ascent');
-  if (comp.air <= 0 && !comp.outOfAir) { comp.outOfAir = true; diveStats.warnings.push('Ran out of air — emergency ascent'); toast('🚨 Out of air! Emergency ascent'); }
-  if (comp.outOfAir) { diver.p.y = Math.min(-0.3, diver.p.y + dt * 1.5); if (d < 1) { endDive(); } }
-}
-function updateComputer() {
-  const d = -diver.p.y, ndl = ndlAt(d), mm = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-  $('c-air').textContent = `${Math.round(comp.air)} bar`; $('c-airbar').style.width = `${comp.air / 2}%`; $('c-airbar').className = comp.air < 50 ? 'low' : comp.air < 100 ? 'mid' : '';
-  $('c-time').textContent = mm(t - diveStats.start);
-  if (comp.load > 1) { $('c-ndl-k').textContent = 'DECO'; $('c-ndl').textContent = `stop at 3–6 m · ${Math.ceil((comp.load - 1) * 15)} min`; $('computer').classList.add('alarm'); }
-  else { $('c-ndl-k').textContent = 'No-deco'; $('c-ndl').textContent = ndl === Infinity ? '—' : `${Math.max(0, Math.floor((1 - comp.load) * ndl))} min`; $('computer').classList.remove('alarm'); }
-  const r = comp.rate || 0; $('c-rate').textContent = `${r > 0 ? '▲' : r < 0 ? '▼' : ''} ${Math.abs(r).toFixed(0)} m/min`; $('c-rate').className = r > 9 ? 'bad' : '';
-  const needStop = diveStats.maxDepth > 10 && comp.safety < 180;
-  $('c-stop').textContent = comp.load > 1 ? 'Decompression stop' : needStop ? (d <= 6.5 && d >= 2.5 ? `Safety stop ${mm(180 - comp.safety)}` : 'Safety stop needed at 5 m') : diveStats.maxDepth > 10 ? 'Safety stop done ✓' : '';
+  if ((diver.breath -= dt) < 0 && depth > 1) { diver.breath = turbo ? 2.4 : 3.5; audio.exhale(turbo); if (depth > 1.5) for (let i = 0; i < (gearIdx ? 14 : 8); i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
 }
 
 // ---------- main loop ----------
@@ -1230,8 +1302,7 @@ function frame(now, manual) {
   const dt = manual > 0 ? manual : Math.min(0.05, (now - last) / 1000); last = now; fps = lerp(fps, 1 / Math.max(dt, 0.001), 0.05);
   if (!site) return;
   t += dt;
-  if (!uiOpen()) { stepDiver(dt); if (diveOpts.realistic && site) stepComputer(dt); }
-  if (!site) return;
+  if (!uiOpen()) stepDiver(dt);
   updateCells(); updateTiles();
   live.length = 0;
   for (const c of cells.values()) { if (anyDead) c.list = c.list.filter(x => !x.dead); for (const x of c.list) live.push(x); }
@@ -1243,19 +1314,20 @@ function frame(now, manual) {
   for (const c of live) stepCreature(c, dt, dSpeed);
 
   const depth = -diver.p.y, amb = ambient(depth), dark = 1 - amb;
-  diveStats.maxDepth = Math.max(diveStats.maxDepth, depth);
+  diveStats.maxDepth = Math.max(diveStats.maxDepth, depth); updateGear(depth);
+  const G = gear();
   // camera
   const f = forward();
   const fp = firstPerson || camMode;
   diverModel.grp.visible = !fp;
-  if (fp) camera.position.copy(diver.p).addScaledVector(f, 0.35).add(_v.set(0, 0.1, 0));
-  else { camera.position.copy(diver.p).addScaledVector(f, -4.2).add(_v.set(0, 1.2, 0)); pushOut(camera.position, 0.3); }
+  if (fp) camera.position.copy(diver.p).addScaledVector(f, G.fp[0]).add(_v.set(0, G.fp[1], 0));
+  else { camera.position.copy(diver.p).addScaledVector(f, -G.cam[0]).add(_v.set(0, G.cam[1], 0)); pushOut(camera.position, 0.3); }
   if (camera.position.y > -0.12) camera.position.y = -0.12;
   camera.lookAt(_v.copy(diver.p).addScaledVector(f, 8).add(_v2.set(0, 0.9, 0)));
   if (debugCam?.target) { camera.position.copy(debugCam.target.p).add(debugCam.off); camera.lookAt(debugCam.target.p); }
   else if (debugCam) { camera.position.copy(diver.p).add(debugCam.off); camera.lookAt(_v.copy(diver.p).add(debugCam.look || _v2.set(0, 0, 0))); }
   diverModel.grp.position.copy(diver.p);
-  diverModel.grp.rotation.set(0, diver.yaw, diver.pitch);
+  diverModel.grp.rotation.set(0, diver.yaw, G.upright ? clamp(-diver.v.dot(_v.set(Math.cos(diver.yaw), 0, -Math.sin(diver.yaw))) * 0.04, -0.25, 0.25) : diver.pitch * (G.pitchK ?? 1));   // upright craft only lean
   // light & water
   const camD = -camera.position.y, water = diveOpts.night ? mix(stops(WATER, camD), '#00040a', 0.88) : stops(WATER, camD);
   scene.background.set(water); scene.fog.color.set(water); scene.fog.density = 0.02 + 0.016 * (1 - ambient(camD));
@@ -1264,10 +1336,11 @@ function frame(now, manual) {
   sun.position.copy(diver.p).add(_v.set(20, 60, 10)); sun.target.position.copy(diver.p);
   const shadowsOn = settings.shadows && !diveOpts.night && depth < 45;   // only where sunlight is strong enough to cast them
   sun.castShadow = settings.shadows; renderer.shadowMap.autoUpdate = shadowsOn; sun.shadow.intensity = shadowsOn ? 0.75 : 0;
-  if (bloom) { const k = diveOpts.night ? 1 : clamp(depth / 300, 0, 1); bloom.strength = lerp(0.2, 1.1, k); bloom.threshold = lerp(1.1, 0.55, k); }   // only glow-bright things bloom in the sunlit shallows
+  if (bloom) { const k = diveOpts.night ? 1 : clamp(depth / 300, 0, 1); bloom.strength = lerp(0.2, 1.1, k); bloom.threshold = lerp(1.1, 0.8, k); }   // only glow-bright things bloom in the sunlit shallows
   const torchK = clamp((dark - 0.35) / 0.4, 0, 1);
-  torch.intensity = torchK * 45; torch.position.copy(diver.p).addScaledVector(f, 0.8); torch.target.position.copy(diver.p).addScaledVector(f, 20);
-  diverLamp.intensity = torchK * 6; diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position);
+  torch.intensity = torchK * 45 * G.lamp; torch.distance = 55 * Math.sqrt(G.lamp); torch.position.copy(diver.p).addScaledVector(f, 0.8 + G.cam[0] * 0.25); torch.target.position.copy(diver.p).addScaledVector(f, 20);
+  diverLamp.intensity = torchK * 4 * (1 + G.cam[0] * 0.12); diverLamp.distance = 8 + G.cam[0] * 2;   // bigger craft need a bigger fill light to be seen
+  diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position);
   surface.position.set(diver.p.x, 0, diver.p.z); surface.visible = camD < 150;
   surfU.uTime.value = t; surfU.uNight.value = diveOpts.night ? 1 : 0; surfU.uFogD.value = scene.fog.density; surfU.uWater.value.set(water);
   shafts.forEach(s => { s.visible = depth < 90 && !diveOpts.night; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
@@ -1344,9 +1417,9 @@ function frame(now, manual) {
   CAUST.uTime.value = t;
   renderFrame();
 
-  if ((audioT -= dt) < 0) { audioT = 0.5; let wn = false, sn = false; for (const c of mobile) if (c.sp.type === 'whale' && !c.sp.f?.dolphin && !c.sp.f?.sealion && !c.sp.f?.dugong) { const dd = c.p.distanceTo(diver.p); if (dd < 250) { wn = true; if (c.sp.id === 'sperm' && dd < 120) sn = true; } } audio.update(depth, t, wn, sn); }
+  if ((audioT -= dt) < 0) { audioT = 0.5; let wn = false, sn = false; for (const c of mobile) if (c.sp.type === 'whale' && !c.sp.f?.dolphin && !c.sp.f?.sealion && !c.sp.f?.dugong) { const dd = c.p.distanceTo(diver.p); if (dd < 250) { wn = true; if (c.sp.id === 'sperm' && dd < 120) sn = true; } } audio.update(depth, t, wn, sn); audio.hum((G.hum || 0) * (0.6 + Math.min(1, diver.v.length() / 3) * 0.6)); }
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
-  if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); if (diveOpts.realistic) updateComputer(); }
+  if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); }
   if (camMode && (camT -= dt) < 0) {
     camT = 0.15; framing = analyzeFrame(ambient(depth) < 0.75); const b = framing.best;
     $('vf-focus').className = b ? (framing.stars >= 3 ? 'good' : 'ok') : '';
@@ -1433,7 +1506,6 @@ $('card-more').onclick = () => { if (cardSp) summon(cardSp); };
 function summon(sp) {
   closeCard(); $('guide').hidden = true;
   const d0 = -diver.p.y;
-  if (diveOpts.realistic && (d0 < sp.depth[0] - 2 || d0 > sp.depth[1] + 2)) { toast(`In realistic mode you have to swim to where it lives: ${sp.depth[0].toLocaleString()}–${sp.depth[1].toLocaleString()} m`); return; }
   if (d0 < sp.depth[0] || d0 > sp.depth[1]) {
     const typ = sp.typ || sp.depth, d = clamp((typ[0] + typ[1]) / 2, 1, FLOOR - 3), z = diver.p.z;
     if (d <= topDepth(z) + 0.5) diver.p.set(edgeX(z) + 6, -d, z);
@@ -1491,7 +1563,7 @@ function renderGuide() {
   if (gSel) {
     fillCard('g-', gSel);
     const d = -diver.p.y, ok = d >= gSel.depth[0] && d <= gSel.depth[1], typ = gSel.typ || gSel.depth;
-    $('g-summon').textContent = ok ? 'Summon near me' : diveOpts.realistic ? `Lives at ${gSel.depth[0].toLocaleString()}–${gSel.depth[1].toLocaleString()} m — swim there first` : `Dive to ${Math.round(clamp((typ[0] + typ[1]) / 2, 1, FLOOR - 3)).toLocaleString()} m and summon`;
+    $('g-summon').textContent = ok ? 'Summon near me' : `Dive to ${Math.round(clamp((typ[0] + typ[1]) / 2, 1, FLOOR - 3)).toLocaleString()} m and summon`;
   }
 }
 $('g-summon').onclick = () => { if (gSel) summon(gSel); };
@@ -1593,6 +1665,12 @@ const audio = (() => {
     }
   }
   function clicks() { const at = ctx.currentTime; for (let i = 0; i < 8; i++) { const t0 = at + i * (0.4 + Math.random() * 0.3); hiss(t0, 0.02, 2500, 1, 0.3); } }
+  let humGain = null;
+  function hum(level) {   // thrusters and life support: a low electric hum
+    if (!ctx) return;
+    if (!humGain) { humGain = ctx.createGain(); humGain.gain.value = 0; const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 220; for (const hz of [48, 48.7, 96.3]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz; o.connect(f); o.start(); } f.connect(humGain).connect(master); }
+    humGain.gain.setTargetAtTime(settings.sound ? level : 0, ctx.currentTime, 0.4);
+  }
   function update(depth, now, whaleNear, spermNear) {
     if (!ctx || !settings.sound) return;
     const k = clamp(depth / 200, 0, 1);
@@ -1608,7 +1686,7 @@ const audio = (() => {
     for (let i = 0; i < n; i++) { const u = i / n; d[i] = (Math.random() * 2 - 1) * Math.pow(1 - u, 3) * (u < 0.12 || (u > 0.5 && u < 0.62) ? 1 : 0.15); }
     const src = ctx.createBufferSource(), g = ctx.createGain(); g.gain.value = 0.5; src.buffer = buf; src.connect(g).connect(master); src.start();
   }
-  return { init, apply, inhale, exhale, update, shutter };
+  return { init, apply, inhale, exhale, update, shutter, hum };
 })();
 const shutterSound = () => audio.shutter();
 
@@ -1679,17 +1757,13 @@ canvas.addEventListener('wheel', e => { if (!camMode) return; e.preventDefault()
 
 // ---------- dive summary ----------
 function endDive() {
-  if (diveOpts.realistic && -diver.p.y > 2 && !comp.outOfAir) { toast(`Ascend to the surface to end the dive — you're at ${Math.round(-diver.p.y)} m`); return; }
   const shots = photos.filter(p => p.dive === diveId), mins = Math.max(1, Math.round((t - diveStats.start) / 60));
-  if (diveOpts.realistic) diveStats.extra = [['Air used', `${Math.round(200 - comp.air)} bar (${Math.round(comp.air)} bar left)`], ['Safety stop', diveStats.maxDepth <= 10 ? 'not needed' : comp.safety >= 180 ? 'done ✓' : 'skipped']];
   $('sum-title').textContent = `${site.name} · ${diveOpts.night ? 'night' : 'day'} dive`;
-  const rows = [['Mode', diveOpts.realistic ? 'Realistic' : 'Explorer'], ['Dive time', `${mins} min`], ['Max depth', `${Math.round(diveStats.maxDepth).toLocaleString()} m`],
+  const rows = [['Dive time', `${mins} min`], ['Max depth', `${Math.round(diveStats.maxDepth).toLocaleString()} m`],
     ['Photos', `${shots.length}${shots.length ? ` · ${shots.filter(p => p.stars === 3).length} three-star` : ''}`],
-    ['To research', `${shots.filter(p => p.subject && !progress.discovered[p.subject.id]).length} unidentified animal photo(s)`], ...(diveStats.extra || [])];
+    ['Deepest gear', GEAR[gearAt(diveStats.maxDepth)].name], ['To research', `${shots.filter(p => p.subject && !progress.discovered[p.subject.id]).length} unidentified animal photo(s)`]];
   $('sum-meta').innerHTML = ''; for (const [k, v] of rows) { const a = document.createElement('dt'), b = document.createElement('dd'); a.textContent = k; b.textContent = v; $('sum-meta').append(a, b); }
   $('sum-shots').innerHTML = ''; for (const p of shots.slice(-8)) { const i = document.createElement('img'); i.src = p.img; i.alt = ''; $('sum-shots').appendChild(i); }
-  $('sum-warn').hidden = !diveStats.warnings.length; $('sum-warn').textContent = diveStats.warnings.join(' · ');
-  if (diveOpts.realistic && diveStats.maxDepth > 18 && comp.safety >= 180 && !diveStats.warnings.length) completeGoal(GOALS.find(g => g.id === 'book'));
   setCamMode(false); closeCard(); $('guide').hidden = true; $('photos').hidden = true; document.exitPointerLock?.();
   site = null; $('hud').hidden = true; $('summary').hidden = false; applyTouch();
 }
@@ -1907,7 +1981,6 @@ const GOALS = [
   { id: 'macro', icon: '🔬', name: 'Macro master', desc: 'A ★★★ photo of an animal smaller than 10 cm', test: p => p.subject && SP[p.subject.id].size < 0.1 && p.stars === 3 },
   { id: 'crowd', icon: '🐠', name: 'Busy reef', desc: '4 different kinds of animal in one frame', test: p => !!p.subject && p.others.length >= 3 },
   { id: 'garden', icon: '🪱', name: 'Garden party', desc: '5 or more garden eels in one frame', test: p => p.subject?.id === 'garden_eel' && p.subject.count >= 5 },
-  { id: 'book', icon: '📋', name: 'By the book', desc: 'A realistic dive below 18 m with a safety stop and no warnings', test: () => false },
 ];
 function completeGoal(g) { if (progress.goals[g.id]) return; progress.goals[g.id] = Date.now(); toast(`🎯 Challenge complete: ${g.name}`); saveProgress(); }
 function checkGoals(photo, c) {
@@ -1979,7 +2052,7 @@ function applyTouch() {
 {
   const joy = $('joy'), knob = $('joy-knob'); let jid = null;
   const move = e => { const r = joy.getBoundingClientRect(), R = r.width / 2; let x = (e.clientX - r.left - R) / R, y = (e.clientY - r.top - R) / R; const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; } touch.x = x; touch.y = y; knob.style.transform = `translate(${x * R * 0.6}px, ${y * R * 0.6}px)`; };
-  joy.addEventListener('pointerdown', e => { jid = e.pointerId; joy.setPointerCapture(jid); move(e); e.preventDefault(); });
+  joy.addEventListener('pointerdown', e => { jid = e.pointerId; try { joy.setPointerCapture(jid); } catch { /* synthetic pointer */ } move(e); e.preventDefault(); });
   joy.addEventListener('pointermove', e => { if (e.pointerId === jid) move(e); });
   const end = e => { if (e.pointerId !== jid) return; jid = null; touch.x = touch.y = 0; knob.style.transform = ''; };
   joy.addEventListener('pointerup', end); joy.addEventListener('pointercancel', end);
@@ -2013,18 +2086,13 @@ function renderSitePicker() {
     el.onclick = () => startDive(s); $('sites').appendChild(el);
   }
   for (const b of $('opt-time').querySelectorAll('button')) b.classList.toggle('on', (b.dataset.v === 'night') === diveOpts.night);
-  for (const b of $('opt-mode').querySelectorAll('button')) b.classList.toggle('on', (b.dataset.v === 'realistic') === diveOpts.realistic);
-  $('mode-note').textContent = diveOpts.realistic
-    ? 'Realistic: a real dive computer — limited air that drains faster the deeper you go, no-decompression limits, slow ascents and a safety stop. The deep zones are out of reach, just as they are for real divers.'
-    : 'Explorer: unlimited air and no decompression — dive anywhere, all the way to the trench floor.';
   const n = needsResearch().length; $('to-land').textContent = `🏝️ Research station${n ? ` · ${n} to identify` : ''}`;
 }
 function showPicker() { renderSitePicker(); $('picker').hidden = false; $('land').hidden = true; }
 $('opt-time').onclick = e => { const v = e.target.closest('button')?.dataset.v; if (v) { diveOpts.night = v === 'night'; renderSitePicker(); } };
-$('opt-mode').onclick = e => { const v = e.target.closest('button')?.dataset.v; if (v) { diveOpts.realistic = v === 'realistic'; renderSitePicker(); } };
 renderSitePicker(); applyTouch();
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
-window.scuba = { step: (n, dt = 1 / 30) => { for (let i = 0; i < n; i++) frame(performance.now(), dt); }, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
+window.scuba = { lights: { torch, diverLamp, sun, hemi }, diverModel, step: (n, dt = 1 / 30) => { for (let i = 0; i < n; i++) frame(performance.now(), dt); }, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
 requestAnimationFrame(frame);
 })();
