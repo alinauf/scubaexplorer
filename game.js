@@ -1021,7 +1021,7 @@ const diverModel = (() => {
     lens.emissiveIntensity = torchK * 3; beam.material.opacity = torchK * 0.07;
   }
   setGear('rec');
-  return { grp, animate, setGear };
+  return { grp, animate, setGear, beam };
 })();
 
 // ---------- gear changes with depth (real equipment for each depth range) ----------
@@ -1326,10 +1326,11 @@ function frame(now, manual) {
   if (camera.position.y > -0.12) camera.position.y = -0.12;
   if (fp) camera.lookAt(_v.copy(camera.position).add(f));
   else camera.lookAt(_v.copy(diver.p).addScaledVector(f, G.cam[0] * settings.camK * 0.7).add(side).add(_v2.set(0, G.cam[1] * settings.camK * 0.4, 0)));   // close over-the-shoulder view
+  if (VIEW.on) { diverModel.grp.visible = true; diverModel.grp.rotation.set(0, diver.yaw, 0); stepGearView(dt); diver.kick += dt * 0.8; }
   if (debugCam?.target) { camera.position.copy(debugCam.target.p).add(debugCam.off); camera.lookAt(debugCam.target.p); }
   else if (debugCam) { camera.position.copy(diver.p).add(debugCam.off); camera.lookAt(_v.copy(diver.p).add(debugCam.look || _v2.set(0, 0, 0))); }
   diverModel.grp.position.copy(diver.p);
-  diverModel.grp.rotation.set(0, diver.yaw, G.upright ? clamp(-diver.v.dot(_v.set(Math.cos(diver.yaw), 0, -Math.sin(diver.yaw))) * 0.04, -0.25, 0.25) : diver.pitch * (G.pitchK ?? 1));   // upright craft only lean
+  if (!VIEW.on) diverModel.grp.rotation.set(0, diver.yaw, G.upright ? clamp(-diver.v.dot(_v.set(Math.cos(diver.yaw), 0, -Math.sin(diver.yaw))) * 0.04, -0.25, 0.25) : diver.pitch * (G.pitchK ?? 1));   // upright craft only lean
   // light & water
   const camD = -camera.position.y, water = diveOpts.night ? mix(stops(WATER, camD), '#00040a', 0.88) : stops(WATER, camD);
   scene.background.set(water); scene.fog.color.set(water); scene.fog.density = 0.02 + 0.016 * (1 - ambient(camD));
@@ -1342,7 +1343,7 @@ function frame(now, manual) {
   const torchK = clamp((dark - 0.35) / 0.4, 0, 1);
   torch.intensity = torchK * 45 * G.lamp; torch.distance = 55 * Math.sqrt(G.lamp); torch.position.copy(diver.p).addScaledVector(f, 0.8 + G.cam[0] * 0.25); torch.target.position.copy(diver.p).addScaledVector(f, 20);
   diverLamp.intensity = torchK * 4 * (1 + G.cam[0] * 0.12); diverLamp.distance = 8 + G.cam[0] * 2;   // bigger craft need a bigger fill light to be seen
-  diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position);
+  diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position); if (VIEW.on) diverModel.beam.material.opacity = 0;
   surface.position.set(diver.p.x, 0, diver.p.z); surface.visible = camD < 150;
   surfU.uTime.value = t; surfU.uNight.value = diveOpts.night ? 1 : 0; surfU.uFogD.value = scene.fog.density; surfU.uWater.value.set(water);
   shafts.forEach(s => { s.visible = depth < 90 && !diveOpts.night; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
@@ -1453,6 +1454,8 @@ function pick() {
 // ---------- HUD ----------
 const gaugePos = d => { let i = ZONES.findIndex(z => d < z[1]); if (i < 0) i = ZONES.length - 1; const z = ZONES[i]; return (i + clamp((d - z[0]) / (z[1] - z[0]), 0, 1)) / ZONES.length; };
 $('gauge').innerHTML = ZONES.map(z => `<div class="seg" style="border-color:${stops(WATER, (z[0] + z[1]) / 2)}"><b>${z[2]}</b><small>${z[0].toLocaleString()} m</small></div>`).join('') + '<i id="gauge-mark"></i>';
+function setPanelMin(min) { settings.panelMin = min; saveSettings(); $('panel').classList.toggle('min', min); $('panel-toggle').textContent = min ? '▸' : '▾'; $('panel-toggle').setAttribute('aria-label', min ? 'Show dive info' : 'Hide dive info'); }
+$('panel-toggle').onclick = () => setPanelMin(!settings.panelMin);
 function updateHud() {
   const d = -diver.p.y, z = zoneOf(d);
   const temp = d < 50 ? maldives.surf : maldives.deep + (maldives.surf - maldives.deep) * Math.exp(-(d - 50) / 400);
@@ -1756,7 +1759,7 @@ $('ph-filters').onclick = e => { const f = e.target.dataset?.f; if (f) { logFilt
 $('pv-back').onclick = () => { $('pv').hidden = true; };
 $('pv-delete').onclick = async () => { if (!viewing || !confirm('Delete this photo?')) return; photos = photos.filter(p => p !== viewing); await photoDB.del(viewing.id); updateShotCount(); $('pv').hidden = true; renderPhotos(); };
 const viewDistance = k => { settings.camK = clamp(settings.camK * k, 0.35, 2); saveSettings(); };   // third-person camera distance
-canvas.addEventListener('wheel', e => { if (!site) return; e.preventDefault(); if (camMode) { zoom = clamp(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 1, 4); updateZoom(); } else viewDistance(e.deltaY < 0 ? 1 / 1.1 : 1.1); }, { passive: false });
+canvas.addEventListener('wheel', e => { if (!site) return; e.preventDefault(); if (VIEW.on) { VIEW.dist = clamp(VIEW.dist * (e.deltaY < 0 ? 0.9 : 1.1), 0.4, 3); VIEW.input = t; return; } if (camMode) { zoom = clamp(zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12), 1, 4); updateZoom(); } else viewDistance(e.deltaY < 0 ? 1 / 1.1 : 1.1); }, { passive: false });
 
 // ---------- dive summary ----------
 function endDive() {
@@ -2005,16 +2008,17 @@ function renderGoalsInto(el) {
 
 
 // ---------- input ----------
-const uiOpen = () => ['guide', 'help', 'picker', 'photos', 'settings', 'summary', 'land'].some(id => !$(id).hidden);
+const uiOpen = () => VIEW.on || ['guide', 'help', 'picker', 'photos', 'settings', 'summary', 'land'].some(id => !$(id).hidden);
 let locked = false, lockFailed = false, drag = null;
 document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; if (locked) mouseNDC = null; });
 document.addEventListener('pointerlockerror', () => { lockFailed = true; });
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') { if (e.code === 'Escape') $('guide').hidden = true; return; }
-  if (e.code === 'Escape') { if (!$('settings').hidden) { $('settings').hidden = true; return; } if (!$('pv').hidden) $('pv').hidden = true; else if (!$('photos').hidden) $('photos').hidden = true; else if (camMode) setCamMode(false); $('guide').hidden = true; $('help').hidden = true; closeCard(); return; }
+  if (e.code === 'Escape') { if (!$('settings').hidden) { $('settings').hidden = true; return; } if (VIEW.on) { closeGearView(); return; } if (!$('pv').hidden) $('pv').hidden = true; else if (!$('photos').hidden) $('photos').hidden = true; else if (camMode) setCamMode(false); $('guide').hidden = true; $('help').hidden = true; closeCard(); return; }
   if (!site) return;
   if (e.code === 'KeyG') { e.preventDefault(); $('guide').hidden ? openGuide() : ($('guide').hidden = true); return; }
   if (e.code === 'KeyH') { $('help').hidden = !$('help').hidden; return; }
+  if (e.code === 'KeyI') { VIEW.on ? closeGearView() : !uiOpen() && openGearView(); return; }
   if (e.code === 'KeyV') { firstPerson = !firstPerson; return; }
   if (e.code === 'KeyP') { $('photos').hidden ? openPhotos() : ($('photos').hidden = true); return; }
   if (uiOpen()) return;
@@ -2028,7 +2032,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
-const look = (dx, dy) => { const k = 0.0025 / (camMode ? zoom : 1); diver.yaw -= dx * k; diver.pitch = clamp(diver.pitch - dy * k, -1.45, 1.45); };
+const look = (dx, dy) => { if (VIEW.on) { VIEW.yaw += dx * 0.008; VIEW.pitch = clamp(VIEW.pitch + dy * 0.006, -1.2, 1.3); VIEW.input = t; return; } const k = 0.0025 / (camMode ? zoom : 1); diver.yaw -= dx * k; diver.pitch = clamp(diver.pitch - dy * k, -1.45, 1.45); };
 canvas.addEventListener('mousedown', e => { drag = { moved: 0 }; });
 addEventListener('mouseup', () => {
   if (!drag) return; const wasClick = drag.moved < 5; drag = null;
@@ -2045,6 +2049,105 @@ addEventListener('mousemove', e => {
 $('help-close').onclick = $('help-x').onclick = () => { $('help').hidden = true; };
 $('help').onclick = e => { if (e.target === $('help')) $('help').hidden = true; };   // click outside the card to close
 $('open-help').onclick = () => { $('help').hidden = false; };
+
+// ---------- gear viewer: orbit the equipment in 360° and learn its parts ----------
+const PARTS = {
+  rec: [
+    [[0.74, 0.1, 0], 'Mask', 'An air space in front of your eyes lets you focus underwater. You breathe out through your nose into it to stop it squeezing.'],
+    [[0.76, -0.03, 0.05], 'Regulator', 'Delivers air at the same pressure as the surrounding water — and only when you breathe in.'],
+    [[0, 0.34, 0], 'Tank', 'About 11 litres of air squeezed to 200 bar — roughly 2,200 litres at the surface.'],
+    [[0.2, -0.14, 0.18], 'BCD', 'Buoyancy control device: a jacket you add air to or let air out of so you float, sink or hover.'],
+    [[-0.12, -0.13, 0.08], 'Weight belt', 'Lead weights offset the buoyancy of the wetsuit and the air you carry.'],
+    [[-0.04, -0.18, 0.22], 'Pressure gauge', 'Shows how much air is left in the tank.'],
+    [[0.9, -0.15, 0.2], 'Dive light', 'Water absorbs colour with depth — red goes first — so a light brings true colours back.'],
+    [[-1.3, -0.02, 0.12], 'Fins', 'Long blades turn slow, relaxed leg kicks into efficient thrust.'],
+  ],
+  tech: [
+    [[0, 0.34, 0], 'Twinset', 'Two back-mounted cylinders joined by an isolation manifold: if one side leaks, it can be shut off and half the gas saved.'],
+    [[0.38, 0.26, 0.1], 'Isolation manifold', 'The valve bar connecting the twin cylinders.'],
+    [[0.18, -0.08, 0.36], 'Stage & deco cylinders', 'Different mixes for different depths — trimix for the deep part, oxygen-rich gases to speed up decompression on the way up.'],
+    [[0.76, -0.03, 0.05], 'Trimix', 'Helium replaces some of the nitrogen and oxygen so the diver avoids narcosis and oxygen toxicity at extreme depth.'],
+    [[-1.3, -0.02, 0.12], 'Fins', 'Technical divers favour stiff, short blades for precise frog kicks that don\'t stir up silt.'],
+  ],
+  ads: [
+    [[0.05, 1.12, 0], 'Dome', 'The pilot stays at surface pressure (1 atmosphere) inside, so there is no decompression at all.'],
+    [[0.22, 0.02, 0.62], 'Rotary joints', 'Sealed, fluid-filled joints let the arms and legs bend while holding back the crushing pressure outside.'],
+    [[0.62, -0.12, 0.5], 'Manipulators', 'Pincer "hands" instead of gloves — delicate work is hard.'],
+    [[-0.66, 0.05, 0.36], 'Thrusters', 'Electric thrusters, steered with foot pedals, let the pilot fly through the water.'],
+    [[-0.58, 0.45, 0], 'Life support', 'Oxygen supply and a scrubber that removes the carbon dioxide the pilot breathes out.'],
+    [[0.3, 0.55, 0.3], 'Lamps', 'At these depths there is no sunlight at all.'],
+  ],
+  alvin: [
+    [[3.3, -0.35, 0.75], 'Personnel sphere', 'A titanium sphere about 2 m across inside, for a pilot and two scientists. Most of the sub around it floods with water.'],
+    [[3.82, -0.3, 0], 'Viewports', 'Thick acrylic windows looking forward and down at the seafloor.'],
+    [[4.1, -1.1, 0.6], 'Manipulator arms', 'Collect rocks, animals and water samples.'],
+    [[3.1, -1.1, 0.9], 'Sample basket', 'Carries tools out and samples back.'],
+    [[0.3, 2.1, 0], 'Sail', 'Hatch and handholds for launch and recovery at the surface.'],
+    [[0, 1.1, 0.7], 'Syntactic foam', 'Most of the white hull is buoyant foam made of tiny glass spheres in resin, which keeps its shape under enormous pressure.'],
+    [[-3.3, 0.35, 1.1], 'Thrusters', 'Electric thrusters move the sub slowly around the seafloor.'],
+    [[3.5, 0.75, 0.8], 'Lights & cameras', 'A bar of lights and high-definition cameras.'],
+  ],
+  dsc: [
+    [[0.1, 0, 0.75], 'Pilot sphere', 'A steel sphere just 1.09 m across inside. James Cameron sat folded in it for the 10,908 m dive in 2012.'],
+    [[0.82, 0.05, 0], 'Viewport', 'A single small window, plus 3D cameras for filming.'],
+    [[1.3, 2.6, 0], 'LED light tower', 'A tall array of lights to film in the pitch-black trench.'],
+    [[0.3, 4.6, 0.5], 'Vertical hull', 'Built from a new syntactic foam. It sinks and rises upright like a vertical torpedo to travel fast — the descent took about 2.5 hours.'],
+    [[-0.2, 2.2, 0.95], 'Thrusters', '12 thrusters for manoeuvring along the trench floor.'],
+    [[-0.3, -0.7, 0.4], 'Ballast weights', 'Steel weights dropped at the end of the dive so the sub floats back up.'],
+  ],
+};
+const VIEW_FRAME = { rec: [[-0.2, 0, 0], 3], tech: [[-0.2, 0, 0], 3], ads: [[0, 0, 0], 4.2], alvin: [[0, 0, 0], 13], dsc: [[0, 2.6, 0], 13] };
+const VIEW = { on: false, gear: 0, yaw: 0, pitch: 0.25, dist: 1, input: 0, part: -1 };
+const studio = new THREE.DirectionalLight(0xffffff, 0), studioFill = new THREE.AmbientLight(0xffffff, 0);
+scene.add(studio, studio.target, studioFill);
+function openGearView() {
+  if (!site) return;
+  setCamMode(false); closeCard(); document.exitPointerLock?.();
+  Object.assign(VIEW, { on: true, yaw: 2.3, pitch: 0.25, dist: 1, input: 0, part: -1 });
+  $('hud').hidden = true; $('gearview').hidden = false; selectViewGear(gearIdx);
+}
+function closeGearView() { VIEW.on = false; camera.clearViewOffset(); diverModel.setGear(gear().id); $('gearview').hidden = true; $('hud').hidden = false; studio.intensity = studioFill.intensity = 0; }
+function selectViewGear(i) {
+  VIEW.gear = i; VIEW.part = -1; const G = GEAR[i], lo = i ? GEAR[i - 1].upTo : 0;
+  diverModel.setGear(G.id);
+  $('gv-tabs').innerHTML = '';
+  GEAR.forEach((g, k) => { const b = document.createElement('button'); b.className = k === i ? 'on' : ''; b.textContent = `${g.icon} ${g.name}`; b.onclick = () => selectViewGear(k); $('gv-tabs').appendChild(b); });
+  $('gv-name').textContent = `${G.icon} ${G.name}`;
+  $('gv-depth').textContent = `Used from ${lo.toLocaleString()} m to ${G.upTo === Infinity ? 'the deepest trench (10,935 m)' : `${G.upTo.toLocaleString()} m`}${i === gearIdx ? ' · your gear right now' : ''}`;
+  $('gv-note').textContent = G.note;
+  $('gv-parts').innerHTML = ''; $('hotspots').innerHTML = '';
+  PARTS[G.id].forEach(([, name], k) => {
+    const li = document.createElement('li'); li.innerHTML = `<b>${k + 1}</b><span></span>`; li.querySelector('span').textContent = name; li.onclick = () => focusPart(k); $('gv-parts').appendChild(li);
+    const h = document.createElement('button'); h.className = 'hot'; h.textContent = k + 1; h.setAttribute('aria-label', name); h.onclick = () => focusPart(k); $('hotspots').appendChild(h);
+  });
+  $('gv-part').hidden = true;
+}
+function focusPart(k) {   // explain a part and turn the model so it faces the camera
+  const [p, name, text] = PARTS[GEAR[VIEW.gear].id][k]; VIEW.part = k; VIEW.input = t;
+  $('gv-part').hidden = false; $('gv-part-name').textContent = `${k + 1}. ${name}`; $('gv-part-text').textContent = text;
+  const w = diverModel.grp.localToWorld(new Vector3(...p)).sub(diverModel.grp.localToWorld(new Vector3(...VIEW_FRAME[GEAR[VIEW.gear].id][0])));
+  if (w.lengthSq() > 1e-4) VIEW.yaw = Math.atan2(w.z, w.x);
+  [...$('gv-parts').children].forEach((li, j) => li.classList.toggle('on', j === k));
+}
+function stepGearView(dt) {   // camera orbit, studio lights and hotspot labels
+  diverModel.grp.updateMatrixWorld(true);
+  const id = GEAR[VIEW.gear].id, [c, r] = VIEW_FRAME[id], center = diverModel.grp.localToWorld(new Vector3(...c)), R = r * VIEW.dist;
+  if (t - VIEW.input > 3) VIEW.yaw += dt * 0.25;   // slow turntable when idle
+  camera.position.set(center.x + Math.cos(VIEW.pitch) * Math.cos(VIEW.yaw) * R, center.y + Math.sin(VIEW.pitch) * R, center.z + Math.cos(VIEW.pitch) * Math.sin(VIEW.yaw) * R);
+  camera.lookAt(center); camera.updateMatrixWorld();
+  // keep the model clear of the info panel: shift it right on wide screens, up on narrow ones
+  if (innerWidth > 760) camera.setViewOffset(innerWidth, innerHeight, -innerWidth * 0.14, 0, innerWidth, innerHeight);
+  else camera.setViewOffset(innerWidth, innerHeight, 0, innerHeight * 0.22, innerWidth, innerHeight);
+  studio.intensity = 2.4; studio.position.copy(camera.position).add(_v.set(0, R * 0.8, 0)); studio.target.position.copy(center); studioFill.intensity = 0.7;
+  const hs = $('hotspots').children, toCam = _v2.subVectors(camera.position, center).normalize();
+  PARTS[id].forEach(([p], k) => {
+    const w = diverModel.grp.localToWorld(new Vector3(...p)), facing = w.clone().sub(center).normalize().dot(toCam), s = w.project(camera), h = hs[k];
+    if (!h) return;
+    h.style.left = `${(s.x + 1) / 2 * innerWidth}px`; h.style.top = `${(1 - s.y) / 2 * innerHeight}px`;
+    h.style.opacity = s.z > 1 ? 0 : facing < -0.25 ? 0.35 : 1; h.classList.toggle('on', k === VIEW.part);
+  });
+}
+$('open-gear').onclick = openGearView; $('gv-close').onclick = closeGearView;
 
 // ---------- touch controls ----------
 const touch = { x: 0, y: 0, up: false, down: false, fast: false };
@@ -2093,7 +2196,7 @@ function renderSitePicker() {
 }
 function showPicker() { renderSitePicker(); $('picker').hidden = false; $('land').hidden = true; }
 $('opt-time').onclick = e => { const v = e.target.closest('button')?.dataset.v; if (v) { diveOpts.night = v === 'night'; renderSitePicker(); } };
-renderSitePicker(); applyTouch();
+renderSitePicker(); applyTouch(); setPanelMin(!!settings.panelMin);
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
 window.scuba = { lights: { torch, diverLamp, sun, hemi }, diverModel, step: (n, dt = 1 / 30) => { for (let i = 0; i < n; i++) frame(performance.now(), dt); }, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle

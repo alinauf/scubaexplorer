@@ -32,7 +32,12 @@
   #hud { position: fixed; inset: 0; pointer-events: none; }
   #hud > * { pointer-events: auto; }
   #leftcol { position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 10px; width: 262px; }
-  #panel { padding: 12px 16px; }
+  #panel { padding: 12px 16px; position: relative; }
+  #panel-toggle { position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(255,255,255,.1); font-size: 13px; line-height: 1; }
+  #panel-toggle:hover { background: rgba(255,255,255,.2); }
+  #site-name { padding-right: 26px; }
+  #panel.min { padding: 8px 14px; } #panel.min #site-name, #panel.min #target, #panel.min .stats { display: none; }
+  #panel.min #depth { font-size: 24px; padding-right: 30px; } #panel.min #zone { margin: 0; }
   #site-name { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
   #depth { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
   #zone { color: #ffd84a; font-size: 13px; margin-bottom: 8px; }
@@ -146,6 +151,25 @@
   body.touch #controls { display: none; }
   body.touch #buttons .btn { padding: 6px 10px; font-size: 13px; }
   body.touch #gauge { display: none; }
+  /* gear viewer */
+  #gearview { position: fixed; inset: 0; pointer-events: none; z-index: 3; }
+  #gearview > * { pointer-events: auto; }
+  #gv-panel { position: absolute; left: 16px; bottom: 16px; width: min(380px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; padding: 16px; }
+  #gv-panel h2 { margin: 4px 0 2px; font-size: 22px; } #gv-depth { color: #ffd84a; font-size: 13px; margin: 0 0 8px; } #gv-note { font-size: 14px; color: #cfe6f2; margin: 0 0 10px; }
+  #gv-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  #gv-tabs button { padding: 5px 10px; border-radius: 999px; border: 1px solid #2a6a90; background: transparent; font-size: 12px; }
+  #gv-tabs button.on { background: #ffd84a; color: #062033; border-color: #ffd84a; font-weight: 600; }
+  #gv-parts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 13px; }
+  #gv-parts li { display: flex; gap: 6px; align-items: center; cursor: pointer; padding: 3px 4px; border-radius: 6px; } #gv-parts li:hover, #gv-parts li.on { background: rgba(255,216,74,.15); }
+  #gv-parts b, .hot { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #ffd84a; color: #062033; font-size: 12px; font-weight: 700; flex: none; }
+  #gv-part { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255,216,74,.1); border: 1px solid rgba(255,216,74,.3); font-size: 14px; }
+  #gv-part b { display: block; margin-bottom: 2px; }
+  #gv-close { position: absolute; top: 16px; right: 16px; }
+  #gv-hint { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; background: rgba(3,16,31,.7); font-size: 13px; color: #b8dcee; white-space: nowrap; pointer-events: none; }
+  @media (max-width: 760px) { #gv-hint { left: 16px; right: 170px; transform: none; white-space: normal; border-radius: 12px; } #gv-panel { max-height: 46vh; } }
+  #hotspots { position: absolute; inset: 0; pointer-events: none; }
+  .hot { position: absolute; transform: translate(-50%, -50%); border: 2px solid #fff; box-shadow: 0 0 0 3px rgba(0,0,0,.35); pointer-events: auto; transition: opacity .2s, transform .15s; cursor: pointer; }
+  .hot:hover, .hot.on { transform: translate(-50%, -50%) scale(1.25); background: #fff; }
   /* dive setup */
   #setup { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 0 0 10px; }
   .seg-ctl { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(3, 16, 31, 0.6); border: 1px solid #1d5a80; }
@@ -245,6 +269,7 @@
 <div id="hud" hidden>
   <div id="leftcol">
   <div id="panel" class="glass">
+    <button id="panel-toggle" aria-label="Hide dive info">▾</button>
     <div id="site-name"></div>
     <div id="depth"></div>
     <div id="zone"></div>
@@ -263,6 +288,7 @@
     <button id="open-camera" class="btn primary">Camera (F)</button>
     <button id="open-photos" class="btn">Photos (P)</button>
     <button id="open-guide" class="btn">Fish guide (G)</button>
+    <button id="open-gear" class="btn">Gear (I)</button>
     <button id="open-help" class="btn">Controls (H)</button>
     <button id="hud-settings" class="btn" aria-label="Settings">⚙️</button>
     <button id="change-site" class="btn">End dive</button>
@@ -295,6 +321,7 @@
       <li><span class="keys"><kbd>P</kbd></span><span>Photo log: every shot, graded ★–★★★. Subjects stay unidentified until you research them on land.</span></li>
       <li><span class="keys"><kbd>G</kbd></span><span>Fish guide: browse every species and summon any of them</span></li>
       <li><span class="keys"><kbd>V</kbd></span><span>Switch between first- and third-person view</span></li>
+      <li><span class="keys"><kbd>I</kbd></span><span>Gear viewer: spin your equipment in 360° and learn what each part does</span></li>
       <li><span class="keys"><kbd>Scroll</kbd> / <kbd>+</kbd> <kbd>−</kbd></span><span>Move the third-person camera closer or further away</span></li>
     </ul>
     <p style="color:#b8dcee;font-size:14px">Rush at shy fish and they scatter. Stay calm and curious animals like turtles, batfish and Napoleon wrasse come to you. Puffers inflate, garden eels hide in the sand, and sharks hunt smaller fish.</p>
@@ -371,6 +398,21 @@
   </div>
 </div>
 <div id="flash"></div>
+
+<div id="gearview" hidden>
+  <div id="hotspots"></div>
+  <div id="gv-hint">Drag to spin · scroll to zoom · click a number to learn about a part</div>
+  <button id="gv-close" class="btn primary">Back to diving (I)</button>
+  <div id="gv-panel" class="glass">
+    <div class="kind">Your gear by depth</div>
+    <h2 id="gv-name"></h2>
+    <p id="gv-depth"></p>
+    <p id="gv-note"></p>
+    <ul id="gv-parts"></ul>
+    <div id="gv-part" hidden><b id="gv-part-name"></b><span id="gv-part-text"></span></div>
+    <div id="gv-tabs" style="margin-top:12px"></div>
+  </div>
+</div>
 
 <div id="touch" hidden>
   <div id="joy" aria-label="Swim joystick"><div id="joy-knob"></div></div>
