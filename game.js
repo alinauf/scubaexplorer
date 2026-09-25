@@ -922,7 +922,7 @@ function startDive(s) {
   cells = new Map(); summoned = [];
   diver.p.set(edgeX(0) + 7, -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;
   $('site-name').textContent = `${s.name} · ${s.area}`;
-  $('picker').hidden = true; $('hud').hidden = false; $('lookhint').hidden = false; closeCard();
+  $('picker').hidden = true; $('hud').hidden = false; closeCard();
   updateTiles(true);
   if (!startDive.seen) { startDive.seen = 1; $('help').hidden = false; }
 }
@@ -1491,7 +1491,7 @@ canvas.addEventListener('wheel', e => { if (!camMode) return; e.preventDefault()
 // ---------- input ----------
 const uiOpen = () => !$('guide').hidden || !$('help').hidden || !$('picker').hidden || !$('photos').hidden;
 let locked = false, lockFailed = false, drag = null;
-document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; $('lookhint').hidden = locked || !site; if (locked) mouseNDC = null; });
+document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; if (locked) mouseNDC = null; });
 document.addEventListener('pointerlockerror', () => { lockFailed = true; });
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') { if (e.code === 'Escape') $('guide').hidden = true; return; }

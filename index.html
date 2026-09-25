@@ -48,7 +48,6 @@
   #crosshair::after { content: ''; position: absolute; left: 8px; top: 8px; width: 2px; height: 2px; background: #fff; border-radius: 50%; }
   #aim { position: absolute; left: 50%; top: calc(50% + 20px); transform: translateX(-50%); padding: 4px 12px; border-radius: 999px; background: rgba(3, 16, 31, 0.8); font-size: 13px; font-weight: 600; pointer-events: none; white-space: nowrap; }
   #aim::after { content: ' — click or press E'; font-weight: 400; color: #9fcbe0; }
-  #lookhint { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); padding: 8px 16px; border-radius: 999px; background: rgba(3, 16, 31, 0.8); font-size: 14px; pointer-events: none; }
   #controls { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); padding: 6px 14px; border-radius: 999px; font-size: 13px; color: #b8dcee; white-space: nowrap; }
   #toasts { position: absolute; left: 16px; bottom: 60px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
   .toast { padding: 8px 14px; border-radius: 10px; background: rgba(3, 16, 31, 0.85); border-left: 3px solid #ffd84a; font-size: 14px; animation: in .25s ease-out; max-width: 420px; }
@@ -172,7 +171,6 @@
   <div id="gauge"></div>
   <div id="crosshair"></div>
   <div id="aim" hidden></div>
-  <div id="lookhint" hidden>Click the water to look around with the mouse · or drag to look</div>
   <div id="viewfinder" hidden>
     <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
     <div id="vf-focus"></div>
