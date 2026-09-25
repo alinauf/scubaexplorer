@@ -31,7 +31,8 @@
 
   #hud { position: fixed; inset: 0; pointer-events: none; }
   #hud > * { pointer-events: auto; }
-  #panel { position: absolute; top: 16px; left: 16px; padding: 12px 16px; min-width: 230px; }
+  #leftcol { position: absolute; top: 16px; left: 16px; display: flex; flex-direction: column; gap: 10px; width: 262px; }
+  #panel { padding: 12px 16px; }
   #site-name { font-weight: 600; margin-bottom: 6px; font-size: 14px; }
   #depth { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
   #zone { color: #ffd84a; font-size: 13px; margin-bottom: 8px; }
@@ -127,8 +128,12 @@
   #pv .row { display: flex; gap: 8px; margin-top: auto; } #pv .row > * { flex: 1; text-align: center; text-decoration: none; }
 
   #cur .arrow { display: inline-block; font-weight: 700; color: #7fe0ff; }
+  #target { font-size: 12px; color: #b8dcee; max-width: 250px; margin: -2px 0 8px; }
+  .goal-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; margin-bottom: 18px; }
+  .goal { display: grid; grid-template-columns: 30px 1fr; gap: 0 8px; background: #fff; border-radius: 10px; padding: 10px 12px; opacity: .7; }
+  .goal.done { opacity: 1; box-shadow: 0 0 0 2px #2f9a58 inset; } .goal span { font-size: 22px; grid-row: span 3; } .goal small { color: #5b6b73; } .goal em { font-style: normal; font-size: 12px; color: #2f9a58; }
   /* dive computer */
-  #computer { position: absolute; left: 16px; top: 272px; width: 230px; padding: 10px 14px; font-variant-numeric: tabular-nums; font-size: 13px; }
+  #computer { padding: 10px 14px; font-variant-numeric: tabular-nums; font-size: 13px; }
   #computer h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #7fe0ff; }
   #computer.alarm { border-color: #ff5a5a; box-shadow: 0 0 0 2px rgba(255,90,90,.5); }
   #computer dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; } #computer dt { color: #8fb8cc; } #computer dd { margin: 0; text-align: right; }
@@ -234,10 +239,12 @@
 </section>
 
 <div id="hud" hidden>
+  <div id="leftcol">
   <div id="panel" class="glass">
     <div id="site-name"></div>
     <div id="depth"></div>
     <div id="zone"></div>
+    <div id="target" hidden></div>
     <dl class="stats">
       <dt>Pressure</dt><dd id="pressure"></dd>
       <dt>Water</dt><dd id="temp"></dd>
@@ -251,6 +258,7 @@
     <dl><dt>Air</dt><dd id="c-air"></dd></dl><div class="airbar"><div id="c-airbar"></div></div>
     <dl><dt id="c-ndl-k">No-deco</dt><dd id="c-ndl"></dd><dt>Dive time</dt><dd id="c-time"></dd><dt>Ascent</dt><dd id="c-rate"></dd></dl>
     <div id="c-stop"></div>
+  </div>
   </div>
   <div id="buttons">
     <button id="open-camera" class="btn primary">Camera (F)</button>

@@ -972,7 +972,7 @@ CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth:
   resetComputer();
   $('site-name').textContent = `${s.name} · ${s.area}${diveOpts.night ? ' · 🌙 night' : ''}`;
   $('picker').hidden = true; $('land').hidden = true; $('hud').hidden = false; closeCard();
-  updateTiles(true);
+  updateTiles(true); updateTarget();
   if (!startDive.seen) { startDive.seen = 1; $('help').hidden = false; }
 }
 
@@ -1689,6 +1689,7 @@ function endDive() {
   $('sum-meta').innerHTML = ''; for (const [k, v] of rows) { const a = document.createElement('dt'), b = document.createElement('dd'); a.textContent = k; b.textContent = v; $('sum-meta').append(a, b); }
   $('sum-shots').innerHTML = ''; for (const p of shots.slice(-8)) { const i = document.createElement('img'); i.src = p.img; i.alt = ''; $('sum-shots').appendChild(i); }
   $('sum-warn').hidden = !diveStats.warnings.length; $('sum-warn').textContent = diveStats.warnings.join(' · ');
+  if (diveOpts.realistic && diveStats.maxDepth > 18 && comp.safety >= 180 && !diveStats.warnings.length) completeGoal(GOALS.find(g => g.id === 'book'));
   setCamMode(false); closeCard(); $('guide').hidden = true; $('photos').hidden = true; document.exitPointerLock?.();
   site = null; $('hud').hidden = true; $('summary').hidden = false;
 }
@@ -1738,7 +1739,7 @@ function renderLand() {
   for (const b of $('land-tabs').children) b.classList.toggle('on', b.dataset.t === landTab);
   $('lt-identify').textContent = n ? `Identify photos (${n})` : 'Identify photos';
   $('lt-logbook').textContent = `Species logbook · ${found}/${species.length}`;
-  $('lt-badges').textContent = `Badges · ${Object.keys(progress.badges).length}/${BADGES.length}`;
+  $('lt-badges').textContent = `Badges & challenges · ${Object.keys(progress.badges).length + Object.keys(progress.goals).length}/${BADGES.length + GOALS.length}`;
   for (const id of ['identify', 'logbook', 'badges']) $('land-' + id).hidden = landTab !== id;
   if (landTab === 'identify') renderIdentify(); else if (landTab === 'logbook') renderLogbook(); else renderBadges();
 }
@@ -1891,7 +1892,40 @@ $('set-reset').onclick = () => { if (!confirm('Reset your logbook, badges and go
 function applySettings() { applyGraphics(); applyAudio(); applyTouch(); renderSitePicker(); }
 // filled in by later features
 function applyGraphics() { renderer.shadowMap.needsUpdate = true; } function applyAudio() { audio.apply(); } function applyTouch() {}
-function checkGoals() {} function renderGoalsInto(el) { el.innerHTML = ''; }
+// ---------- goals: photo challenges and site targets ----------
+const GOALS = [
+  { id: 'manta', icon: '🪽', name: 'Manta portrait', desc: 'A ★★★ photo of a reef manta ray', test: p => p.subject?.id === 'reef_manta' && p.stars === 3 },
+  { id: 'hammers', icon: '🔨', name: 'Hammerhead school', desc: 'At least 3 scalloped hammerheads in one frame', test: p => p.subject?.id === 'scalloped_hammer' && p.subject.count >= 3 },
+  { id: 'giant', icon: '🐋', name: 'Gentle giant', desc: 'Photograph a whale shark', test: p => p.subject?.id === 'whale_shark' },
+  { id: 'glow', icon: '✨', name: 'Living light', desc: 'Photograph a glowing animal below 500 m', test: p => p.subject && SP[p.subject.id].glow && p.subject.depth > 500 },
+  { id: 'trench', icon: '🕳️', name: 'Trench photographer', desc: 'Photograph an animal below 6,000 m', test: p => p.subject?.depth > 6000 },
+  { id: 'night', icon: '🌙', name: 'Night hunter', desc: 'Photograph a whitetip reef shark on a night dive', test: p => p.night && p.subject?.id === 'whitetip_reef' },
+  { id: 'sleeper', icon: '💤', name: 'Sweet dreams', desc: 'Photograph a parrotfish asleep in its mucus cocoon', test: (p, c) => !!c?.sleep },
+  { id: 'puff', icon: '🐡', name: 'Puffed up', desc: 'Photograph an inflated puffer or porcupinefish', test: (p, c) => c?.puff > 0.6 },
+  { id: 'hunt', icon: '⚡', name: 'Caught in the act', desc: 'Photograph a predator chasing its prey', test: (p, c) => !!c?.prey },
+  { id: 'bait', icon: '🌀', name: 'Bait ball', desc: 'Photograph fish packed into a bait ball', test: (p, c) => !!c && (c.leader || c).ballUntil > t },
+  { id: 'macro', icon: '🔬', name: 'Macro master', desc: 'A ★★★ photo of an animal smaller than 10 cm', test: p => p.subject && SP[p.subject.id].size < 0.1 && p.stars === 3 },
+  { id: 'crowd', icon: '🐠', name: 'Busy reef', desc: '4 different kinds of animal in one frame', test: p => !!p.subject && p.others.length >= 3 },
+  { id: 'garden', icon: '🪱', name: 'Garden party', desc: '5 or more garden eels in one frame', test: p => p.subject?.id === 'garden_eel' && p.subject.count >= 5 },
+  { id: 'book', icon: '📋', name: 'By the book', desc: 'A realistic dive below 18 m with a safety stop and no warnings', test: () => false },
+];
+function completeGoal(g) { if (progress.goals[g.id]) return; progress.goals[g.id] = Date.now(); toast(`🎯 Challenge complete: ${g.name}`); saveProgress(); }
+function checkGoals(photo, c) {
+  if (!photo) return;
+  for (const g of GOALS) if (!progress.goals[g.id] && g.test(photo, c)) completeGoal(g);
+  const tg = site?.target;
+  if (tg && photo.subject?.id === tg.id && photo.stars >= 2 && !progress.targets[site.id]) { progress.targets[site.id] = Date.now(); saveProgress(); toast(`🎯 Site target photographed at ${site.name}!`); updateTarget(); }
+}
+function updateTarget() {
+  const tg = site?.target; $('target').hidden = !tg; if (!tg) return;
+  $('target').textContent = progress.targets[site.id] ? `🎯 Target found: ${label(SP[tg.id])} ✓` : `🎯 Target: ${tg.hint} Get a ★★ photo.`;
+}
+function renderGoalsInto(el) {
+  el.innerHTML = '<h3>Photo challenges</h3><div class="goal-list" id="gl-ch"></div><h3>Site targets</h3><div class="goal-list" id="gl-tg"></div>';
+  const row = (icon, name, desc, done) => { const d = document.createElement('div'); d.className = 'goal' + (done ? ' done' : ''); d.innerHTML = '<span></span><b></b><small></small><em></em>'; d.children[0].textContent = icon; d.children[1].textContent = name; d.children[2].textContent = desc; d.children[3].textContent = done ? `✓ ${new Date(done).toLocaleDateString()}` : ''; return d; };
+  for (const g of GOALS) el.querySelector('#gl-ch').appendChild(row(g.icon, g.name, g.desc, progress.goals[g.id]));
+  for (const s of sites) if (s.target) el.querySelector('#gl-tg').appendChild(row('🎯', s.name, progress.targets[s.id] ? label(SP[s.target.id]) : s.target.hint, progress.targets[s.id]));
+}
 
 
 // ---------- input ----------
@@ -1943,7 +1977,7 @@ function renderSitePicker() {
     const stars = [...new Set(Object.entries(s.featured).sort((a, b) => b[1] - a[1]).map(([id]) => label(SP[id])))].slice(0, 4);
     el.innerHTML = '<b></b><small></small><p></p><em></em><span class="go">Dive here →</span>';
     el.querySelector('b').textContent = s.name; el.querySelector('small').textContent = s.area;
-    el.querySelector('p').textContent = s.desc; el.querySelector('em').textContent = `Look for: ${stars.join(', ')} · Current: ${currentWord(s.current?.[0] || 0)}`;
+    el.querySelector('p').textContent = s.desc; el.querySelector('em').textContent = `Look for: ${stars.join(', ')} · Current: ${currentWord(s.current?.[0] || 0)}${s.target ? ` · 🎯 ${progress.targets[s.id] ? 'target found ✓' : 'target: ' + label(SP[s.target.id])}` : ''}`;
     el.onclick = () => startDive(s); $('sites').appendChild(el);
   }
   for (const b of $('opt-time').querySelectorAll('button')) b.classList.toggle('on', (b.dataset.v === 'night') === diveOpts.night);
