@@ -80,6 +80,14 @@ const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 600);
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
+// environment map: a bright surface above, blue water around, dark below — gives metal, glass, wet skin and scales real reflections
+{
+  const g = new THREE.SphereGeometry(10, 48, 24), p = g.attributes.position, col = [];
+  for (let i = 0; i < p.count; i++) { const y = p.getY(i) / 10; const c = new Color(y > 0.75 ? '#ffffff' : y > 0 ? mix('#2a9ac8', '#dff6ff', (y / 0.75) ** 2) : mix('#2a9ac8', '#03101c', Math.min(1, -y * 1.6))); col.push(c.r, c.g, c.b); }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const envScene = new THREE.Scene(); envScene.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(envScene, 0.02).texture;
+}
 const hemi = new THREE.HemisphereLight(0xbfe8ff, 0x203040, 1);
 const sun = new THREE.DirectionalLight(0xfff2dc, 2.5);
 const torch = new THREE.SpotLight(0xfff0dd, 0, 55, 0.45, 0.6, 1.4);
@@ -638,28 +646,108 @@ const bubbles = points(200, 0.09, 0xffffff, { opacity: 0.8 }), bubbleList = [];
 const bits = points(200, 0.07, 0xffe0e0, { opacity: 0.9 }), bitList = [];
 const haloS = points(1500, 0.6, 0xffffff, { colors: true, add: true }), haloL = points(400, 2.6, 0xffffff, { colors: true, add: true });
 
-// ---------- diver ----------
+// ---------- diver: articulated model with neoprene, BCD, tank, regulator, hoses and flexing fins ----------
 const diverModel = (() => {
-  const grp = new THREE.Group(), suit = new THREE.MeshStandardMaterial({ color: 0x2a4a66, roughness: 0.6 }), yellow = new THREE.MeshStandardMaterial({ color: 0xf0c020, roughness: 0.5 });
-  const add = (geo, mat, x, y, z, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.z = rz; grp.add(m); return m; };
-  add(new THREE.CapsuleGeometry(0.2, 0.9, 6, 12), suit, 0, 0, 0, Math.PI / 2);
-  add(new THREE.CylinderGeometry(0.1, 0.1, 0.62, 12), new THREE.MeshStandardMaterial({ color: 0xd8d8d8, metalness: 0.6, roughness: 0.3 }), 0.05, 0.24, 0, Math.PI / 2);
-  add(new THREE.SphereGeometry(0.14, 14, 10), suit, 0.72, 0.06, 0);
-  add(new THREE.BoxGeometry(0.06, 0.1, 0.2), new THREE.MeshStandardMaterial({ color: 0x9fe0ff, metalness: 0.3, roughness: 0.1 }), 0.84, 0.08, 0);
-  add(new THREE.BoxGeometry(0.5, 0.04, 0.42), new THREE.MeshStandardMaterial({ color: 0x2d8fd8 }), 0.1, 0, 0);
-  add(new THREE.CylinderGeometry(0.035, 0.03, 0.18, 8), yellow, 0.72, -0.14, 0.2, Math.PI / 2);
-  const fins = [-1, 1].map(s => { const piv = new THREE.Group(); piv.position.set(-0.55, 0, s * 0.11); const leg = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.45, 4, 8), suit); leg.rotation.z = Math.PI / 2; leg.position.x = -0.25; piv.add(leg); const fin = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.015, 0.2), yellow); fin.position.x = -0.65; piv.add(fin); grp.add(piv); return piv; });
+  const grp = new THREE.Group(); grp.rotation.order = 'YZX';
+  const grain = (() => { const cv = makeCanvas(128, 128), g = cv.getContext('2d'), R = rng(21); g.fillStyle = '#808080'; g.fillRect(0, 0, 128, 128); for (let i = 0; i < 2600; i++) { const v = 100 + R() * 60 | 0; g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(R() * 128, R() * 128, 1.5, 1.5); } const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 6); return t; })();
+  const std = (color, rough, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: rough, ...extra });
+  const neo = std(0x121417, 0.85, { bumpMap: grain, bumpScale: 0.8 }), neoBlue = std(0x1d6fb8, 0.8, { bumpMap: grain, bumpScale: 0.8 });
+  const bcd = std(0x24272c, 0.7, { bumpMap: grain, bumpScale: 0.4 }), web = std(0x0e0f11, 0.6), rubber = std(0x0b0c0e, 0.5), hoseMat = std(0x1a1b1e, 0.45);
+  const tankMat = std(0xf2c418, 0.28, { metalness: 0.3 }), steel = std(0xd0d4d8, 0.22, { metalness: 0.95 }), skin = std(0xc99478, 0.6);
+  const finMat = std(0x1668b0, 0.4, { side: THREE.DoubleSide }), finTip = std(0xf2d020, 0.4, { side: THREE.DoubleSide });
+  const glass = new THREE.MeshPhysicalMaterial({ color: 0xaee4ff, roughness: 0.02, metalness: 0.1, transparent: true, opacity: 0.4, clearcoat: 1, clearcoatRoughness: 0.02 });
+  const lens = std(0xfff6dd, 0.2, { emissive: 0xfff2cc, emissiveIntensity: 0 }), yellow = std(0xf2c418, 0.45);
+  const add = (geo, mat, parent = grp, m = null) => { const o = new THREE.Mesh(geo, mat); if (m) o.applyMatrix4(m); parent.add(o); return o; };
+  const capsule = (r, len) => { const g = new THREE.CapsuleGeometry(r, len, 6, 14); g.rotateZ(Math.PI / 2); return g; };  // along x
+  const along = (from, to, r0, r1, mat, parent = grp) => { // tapered segment between two points
+    const d = to.clone().sub(from), g = new THREE.CylinderGeometry(r1, r0, d.length(), 14); g.translate(0, d.length() / 2, 0);
+    g.applyQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), d.normalize())); g.translate(from.x, from.y, from.z); return add(g, mat, parent);
+  };
+  const hose = (pts, r, mat) => add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p => new Vector3(...p))), 24, r, 8), mat);
+  // torso: shoulders (+x) to hips; cross-section half height (y) and half width (z)
+  const T = [[0.44, 0.1, 0.13], [0.38, 0.13, 0.2], [0.24, 0.14, 0.19], [0.05, 0.12, 0.16], [-0.12, 0.11, 0.15], [-0.3, 0.12, 0.17], [-0.36, 0.09, 0.13]];
+  const at = (t, k) => { const f = t * (T.length - 1), i = Math.min(T.length - 2, Math.floor(f)), u = f - i; return lerp(T[i][k], T[i + 1][k], u); };
+  const torso = (t0, t1, s, mat) => add(loft(24, 22, t => at(lerp(t0, t1, t), 0), t => at(lerp(t0, t1, t), 1) * s, t => at(lerp(t0, t1, t), 2) * s), mat);
+  torso(0, 1, 1, neo);
+  torso(0.1, 0.62, 1.09, bcd);                        // BCD jacket
+  torso(0.32, 0.4, 1.12, neoBlue);                    // BCD trim band
+  torso(0.8, 0.88, 1.08, web);                        // weight belt
+  add(new THREE.BoxGeometry(0.05, 0.03, 0.07), steel, grp, M(-0.12, -0.125, 0));   // belt buckle
+  for (const s of [-1, 1]) { add(sphere(14), neo, grp, M(0.37, 0.0, s * 0.19, 0, 0, 0, 0.085)); add(new THREE.BoxGeometry(0.2, 0.012, 0.05), neoBlue, grp, M(0.3, 0.155, s * 0.1)); }
+  // neck, head, hood, mask, regulator
+  add(capsule(0.055, 0.08), neo, grp, M(0.49, 0.04, 0));
+  const head = new THREE.Group(); head.position.set(0.61, 0.07, 0); head.rotation.z = -0.3; grp.add(head);
+  add(sphere(20), neo, head, M(0, 0, 0, 0, 0, 0, 0.12, 0.115, 0.105));
+  add(sphere(12), skin, head, M(0.085, -0.055, 0, 0, 0, 0, 0.04, 0.045, 0.065));
+  add(new THREE.CylinderGeometry(0.068, 0.072, 0.05, 28), rubber, head, M(0.1, 0.015, 0, 0, 0, Math.PI / 2, 1, 1, 1.5));
+  add(new THREE.CylinderGeometry(0.06, 0.06, 0.012, 28), glass, head, M(0.127, 0.015, 0, 0, 0, Math.PI / 2, 1, 1, 1.45));
+  add(new THREE.TorusGeometry(0.108, 0.01, 6, 28), rubber, head, M(0.01, 0.02, 0, Math.PI / 2, 0, 0));
+  add(new THREE.CylinderGeometry(0.03, 0.034, 0.07, 16), rubber, head, M(0.13, -0.075, 0.02, Math.PI / 2, 0, 0));
+  add(new THREE.CylinderGeometry(0.022, 0.022, 0.012, 16), std(0x6a6f76, 0.4), head, M(0.16, -0.075, 0.02, 0, 0, Math.PI / 2));
+  // tank with valve, first stage and bands
+  add(new THREE.CylinderGeometry(0.09, 0.09, 0.52, 28), tankMat, grp, M(0.0, 0.235, 0, 0, 0, Math.PI / 2));
+  for (const x of [0.26, -0.26]) add(sphere(20), tankMat, grp, M(x, 0.235, 0, 0, 0, 0, 0.05, 0.09, 0.09));
+  for (const x of [0.12, -0.1]) add(new THREE.CylinderGeometry(0.095, 0.095, 0.035, 28), web, grp, M(x, 0.235, 0, 0, 0, Math.PI / 2));
+  add(new THREE.CylinderGeometry(0.022, 0.026, 0.07, 14), steel, grp, M(0.33, 0.235, 0, 0, 0, Math.PI / 2));
+  add(new THREE.CylinderGeometry(0.032, 0.032, 0.07, 14), steel, grp, M(0.37, 0.24, 0, Math.PI / 2, 0, 0));
+  add(new THREE.TorusGeometry(0.025, 0.007, 6, 14), rubber, grp, M(0.37, 0.28, 0, Math.PI / 2, 0, 0));
+  hose([[0.37, 0.24, 0.035], [0.44, 0.2, 0.15], [0.56, 0.06, 0.15], [0.7, -0.03, 0.05], [0.73, -0.05, 0.02]], 0.011, hoseMat);           // regulator
+  hose([[0.37, 0.24, -0.035], [0.43, 0.22, -0.17], [0.34, 0.08, -0.24], [0.22, -0.02, -0.21]], 0.014, std(0x3a3e44, 0.5));                // inflator
+  hose([[0.36, 0.23, 0.04], [0.3, 0.14, 0.22], [0.1, -0.02, 0.24], [-0.02, -0.12, 0.2]], 0.01, hoseMat);                                   // gauge
+  add(new THREE.CylinderGeometry(0.04, 0.04, 0.035, 24), rubber, grp, M(-0.04, -0.14, 0.19, 0.4, 0, 0));
+  add(new THREE.CylinderGeometry(0.032, 0.032, 0.004, 24), std(0xe8eef2, 0.3, { emissive: 0x335544, emissiveIntensity: 0.2 }), grp, M(-0.04, -0.158, 0.197, 0.4, 0, 0));
+  add(new THREE.CylinderGeometry(0.03, 0.034, 0.06, 14), yellow, grp, M(0.18, -0.14, 0.07, Math.PI / 2, 0, 0));    // octopus (spare regulator)
+  // arms: left tucked under the chest, right holding the torch forward
+  const arm = (s, elbow, hand) => {
+    const sh = new Vector3(0.37, -0.02, s * 0.2), el = new Vector3(...elbow), wr = new Vector3(...hand);
+    along(sh, el, 0.052, 0.045, neo); add(sphere(12), neo, grp, M(el.x, el.y, el.z, 0, 0, 0, 0.046));
+    along(el, wr, 0.044, 0.036, neo); add(sphere(12), rubber, grp, M(wr.x + 0.035, wr.y, wr.z, 0, 0, 0, 0.05, 0.03, 0.042));
+    return wr;
+  };
+  arm(-1, [0.3, -0.24, -0.2], [0.5, -0.2, -0.06]);
+  const wr = arm(1, [0.52, -0.2, 0.26], [0.74, -0.16, 0.2]);
+  add(new THREE.CylinderGeometry(0.026, 0.022, 0.17, 18), std(0x15171a, 0.35, { metalness: 0.4 }), grp, M(wr.x + 0.07, wr.y + 0.01, wr.z, 0, 0, -Math.PI / 2));
+  const bulb = add(new THREE.CylinderGeometry(0.03, 0.03, 0.01, 18), lens, grp, M(wr.x + 0.16, wr.y + 0.01, wr.z, 0, 0, -Math.PI / 2));
+  // legs: hip → knee → ankle, each a pivot; fins flex in two parts
+  const finShape = (w0, w1, len) => { const s = new THREE.Shape(); s.moveTo(0, -w0); s.lineTo(-len, -w1); s.quadraticCurveTo(-len - 0.03, 0, -len, w1); s.lineTo(0, w0); s.lineTo(0, -w0); const g = new THREE.ShapeGeometry(s); g.rotateX(Math.PI / 2); return g; };
+  const legs = [-1, 1].map(s => {
+    const hip = new THREE.Group(); hip.position.set(-0.33, -0.01, s * 0.085); grp.add(hip);
+    add(capsule(0.072, 0.3), neo, hip, M(-0.2, 0, 0));
+    const knee = new THREE.Group(); knee.position.set(-0.4, 0, 0); hip.add(knee);
+    add(capsule(0.058, 0.3), neo, knee, M(-0.19, 0, 0));
+    add(new THREE.CylinderGeometry(0.066, 0.066, 0.05, 16), neoBlue, knee, M(-0.02, 0, 0, 0, 0, Math.PI / 2));
+    const ankle = new THREE.Group(); ankle.position.set(-0.4, -0.005, 0); knee.add(ankle);
+    add(capsule(0.05, 0.12), rubber, ankle, M(-0.07, -0.01, 0, 0, 0, 0, 1, 0.8, 1.1));             // foot pocket
+    add(finShape(0.06, 0.1, 0.3), finMat, ankle, M(-0.1, -0.012, 0));
+    for (const e of [-1, 1]) add(new THREE.BoxGeometry(0.3, 0.018, 0.012), rubber, ankle, M(-0.25, -0.012, e * 0.08, 0, e * -0.13, 0));
+    const tip = new THREE.Group(); tip.position.set(-0.4, -0.012, 0); ankle.add(tip);
+    add(finShape(0.1, 0.13, 0.25), finMat, tip);
+    add(finShape(0.13, 0.135, 0.06), finTip, tip, M(-0.22, 0.001, 0));
+    for (const e of [-1, 1]) add(new THREE.BoxGeometry(0.25, 0.016, 0.01), rubber, tip, M(-0.125, 0, e * 0.115, 0, e * -0.03, 0));
+    return { hip, knee, ankle, tip, s };
+  });
   // visible torch beam (light scattered by the water)
   const beamGeo = new THREE.ConeGeometry(4.5, 18, 32, 1, true); beamGeo.translate(0, -9, 0);
   const beam = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({ color: 0xfff4dd, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, alphaMap: shaftTex, side: THREE.DoubleSide, fog: false }));
-  beam.position.set(0.8, -0.14, 0.2); beam.rotation.z = Math.PI / 2; grp.add(beam);
-  grp.rotation.order = 'YZX'; scene.add(grp);
-  return { grp, fins, beam };
+  beam.position.set(wr.x + 0.17, wr.y + 0.01, wr.z); beam.rotation.z = Math.PI / 2; grp.add(beam);
+  scene.add(grp);
+  function animate(kick, time, torchK) {   // flutter kick: hips swing, knees bend on the up-stroke, fins lag and flex
+    for (const L of legs) {
+      const ph = kick * 3 + (L.s > 0 ? 0 : Math.PI);
+      L.hip.rotation.z = Math.sin(ph) * 0.3;
+      L.knee.rotation.z = -Math.max(0, Math.sin(ph - 0.9)) * 0.55;
+      L.ankle.rotation.z = 0.35 + Math.sin(ph - 1.4) * 0.15;
+      L.tip.rotation.z = Math.sin(ph - 1.8) * 0.35;
+    }
+    head.rotation.y = Math.sin(time * 0.4) * 0.12;
+    lens.emissiveIntensity = torchK * 3; beam.material.opacity = torchK * 0.07;
+  }
+  return { grp, animate };
 })();
 
 // ---------- state ----------
 const diver = { p: new Vector3(), v: new Vector3(), yaw: Math.PI, pitch: -0.15, kick: 0, breath: 0 };
-let site = null, pool = [], hosts = [], cells = new Map(), summoned = [], live = [], t = 0, firstPerson = false;
+let debugCam = null, site = null, pool = [], hosts = [], cells = new Map(), summoned = [], live = [], t = 0, firstPerson = false;
 const keys = {};
 const forward = (out = new Vector3()) => out.set(Math.cos(diver.pitch) * Math.cos(diver.yaw), Math.sin(diver.pitch), -Math.cos(diver.pitch) * Math.sin(diver.yaw));
 
@@ -827,8 +915,9 @@ function stepCreature(c, dt, dSpeed) {
 // ---------- diver ----------
 function stepDiver(dt) {
   const f = forward(), r = _v2.set(Math.sin(diver.yaw), 0, Math.cos(diver.yaw));
-  const fw = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
-  const st = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  const fw = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), st = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  const lx = (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0), ly = (keys.ArrowUp ? 1 : 0) - (keys.ArrowDown ? 1 : 0);
+  diver.yaw -= lx * dt * 1.8; diver.pitch = clamp(diver.pitch + ly * dt * 1.3, -1.45, 1.45);   // arrow keys look around
   const vt = (keys.Space ? 1 : 0) - (keys.KeyC || keys.ControlLeft ? 1 : 0);
   const turbo = keys.ShiftLeft || keys.ShiftRight, depth = -diver.p.y;
   const max = turbo ? 12 + depth * 0.05 : 1.8;   // turbo scales with depth so the trenches are reachable
@@ -867,18 +956,18 @@ function frame(now) {
   else { camera.position.copy(diver.p).addScaledVector(f, -4.2).add(_v.set(0, 1.2, 0)); pushOut(camera.position, 0.3); }
   if (camera.position.y > -0.12) camera.position.y = -0.12;
   camera.lookAt(_v.copy(diver.p).addScaledVector(f, 8).add(_v2.set(0, 0.9, 0)));
+  if (debugCam) { camera.position.copy(diver.p).add(debugCam.off); camera.lookAt(_v.copy(diver.p).add(debugCam.look || _v2.set(0, 0, 0))); }
   diverModel.grp.position.copy(diver.p);
   diverModel.grp.rotation.set(0, diver.yaw, diver.pitch);
-  diverModel.fins.forEach((fin, i) => { fin.rotation.z = Math.sin(diver.kick * 3 + i * Math.PI) * 0.35; });
   // light & water
   const camD = -camera.position.y, water = stops(WATER, camD);
   scene.background.set(water); scene.fog.color.set(water); scene.fog.density = 0.02 + 0.016 * (1 - ambient(camD));
-  hemi.color.set(mix('#ffffff', water, 0.3)); hemi.groundColor.set(mix(water, '#000000', 0.6)); hemi.intensity = 0.05 + 1.5 * amb;
+  hemi.color.set(mix('#ffffff', water, 0.3)); hemi.groundColor.set(mix(water, '#000000', 0.6)); hemi.intensity = 0.04 + 1.0 * amb; scene.environmentIntensity = 0.02 + 0.9 * amb;
   sun.color.set(mix('#fff2dc', '#6fcbe6', clamp(depth / 40, 0, 1))); sun.intensity = 2.6 * amb;
   sun.position.copy(diver.p).add(_v.set(20, 60, 10)); sun.target.position.copy(diver.p);
   const torchK = clamp((dark - 0.35) / 0.4, 0, 1);
   torch.intensity = torchK * 45; torch.position.copy(diver.p).addScaledVector(f, 0.8); torch.target.position.copy(diver.p).addScaledVector(f, 20);
-  diverLamp.intensity = torchK * 6; diverModel.beam.material.opacity = torchK * 0.07; diverLamp.position.copy(camera.position);
+  diverLamp.intensity = torchK * 6; diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position);
   surface.position.set(diver.p.x, 0, diver.p.z); surfTex.offset.set(t * 0.01, t * 0.006); surface.visible = camD < 150;
   shafts.forEach(s => { s.visible = depth < 90; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
   shaftMat.opacity = 0.07 * clamp(1 - depth / 80, 0, 1);
@@ -1123,6 +1212,6 @@ for (const s of sites) {
 }
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
-window.scuba = { diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
+window.scuba = { setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
 requestAnimationFrame(frame);
 })();
