@@ -2,7 +2,8 @@
 (async () => {
 const $ = id => document.getElementById(id);
 let THREE;
-try { THREE = await import('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js'); }
+const CDN = 'https://cdn.jsdelivr.net/npm/three@0.170.0';
+try { THREE = await import(`${CDN}/+esm`); }
 catch (e) { $('loading').textContent = 'Could not load the 3D engine (three.js from cdn.jsdelivr.net). Check your internet connection and reload.'; return; }
 const { Vector3, Color, Quaternion, Matrix4, Euler } = THREE;
 
@@ -78,7 +79,16 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x2596bf, 0.02);
 scene.background = new Color();
 const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 600);
-function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Bloom is optional: if the add-ons fail to load we simply render without it.
+let composer = null, bloom = null;
+try {
+  const [{ EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all(['EffectComposer', 'RenderPass', 'UnrealBloomPass', 'OutputPass'].map(n => import(`${CDN}/examples/jsm/postprocessing/${n}.js/+esm`)));
+  composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, camera));
+  bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.6, 0.5, 0.82); composer.addPass(bloom); composer.addPass(new OutputPass());
+} catch { composer = null; }
+const renderFrame = () => (composer && settings.bloom ? composer.render() : renderer.render(scene, camera));
+function resize() { renderer.setSize(innerWidth, innerHeight, false); composer?.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener('resize', resize); resize();
 
 // environment map: a bright surface above, blue water around, dark below — gives metal, glass, wet skin and scales real reflections
@@ -93,6 +103,7 @@ const hemi = new THREE.HemisphereLight(0xbfe8ff, 0x203040, 1);
 const sun = new THREE.DirectionalLight(0xfff2dc, 2.5);
 const torch = new THREE.SpotLight(0xfff0dd, 0, 55, 0.45, 0.6, 1.4);
 const diverLamp = new THREE.PointLight(0xfff0dd, 0, 7, 1);
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 160 }); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04; sun.shadow.radius = 4;
 scene.add(hemi, sun, sun.target, torch, torch.target, diverLamp);
 
 // ---------- geometry helpers ----------
@@ -645,7 +656,7 @@ function bumpFor(kind) {
   g.fillStyle = '#808080'; g.fillRect(492, 0, 20, 256);
   return BUMP[kind] = new THREE.CanvasTexture(cv);
 }
-const SHINY = new Set(['giant_trevally', 'bluefin_trevally', 'bigeye_trevally', 'barracuda', 'chevron_barracuda', 'yellowfin', 'bluefin', 'sardine', 'indian_mackerel', 'hatchetfish', 'lanternfish', 'sailfish', 'blue_marlin', 'swordfish', 'oarfish', 'mahi', 'opah']);
+const SHINY = new Set(['silver_sprat', 'giant_trevally', 'bluefin_trevally', 'bigeye_trevally', 'barracuda', 'chevron_barracuda', 'yellowfin', 'bluefin', 'sardine', 'indian_mackerel', 'hatchetfish', 'lanternfish', 'sailfish', 'blue_marlin', 'swordfish', 'oarfish', 'mahi', 'opah']);
 // ---------- per-species instanced meshes, animated in the vertex shader ----------
 const MODE_GLSL = [
   '',
@@ -717,6 +728,7 @@ function grow(k, cap) {
   k.geo.setAttribute('aPhase', k.phase);
   k.mesh = new THREE.InstancedMesh(k.geo, k.mat, cap); k.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   k.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3); k.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+  k.mesh.castShadow = true; k.mesh.receiveShadow = CORAL.has(k.sp.type);
   k.mesh.frustumCulled = false; k.mesh.count = 0; k.list = new Array(cap); scene.add(k.mesh);
 }
 
@@ -745,7 +757,7 @@ function rockColor(x, d, z) {
 function tileMesh(pos, col, idx, uv) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
-  const m = new THREE.Mesh(g, rockMat); scene.add(m); return m;
+  const m = new THREE.Mesh(g, rockMat); m.receiveShadow = true; scene.add(m); return m;
 }
 function wallTile(kz, kd) {
   const N = 40, S = TILE / N, pos = [], col = [], idx = [], uv = [];
@@ -791,8 +803,25 @@ const floorGeo = new THREE.PlaneGeometry(700, 700, 40, 40); floorGeo.rotateX(-Ma
 const floor = new THREE.Mesh(floorGeo, rockMat); scene.add(floor);
 
 // ---------- surface, sun shafts, particles ----------
-const surfTex = (() => { const cv = makeCanvas(256, 256), g = cv.getContext('2d'); g.fillStyle = '#9adcf0'; g.fillRect(0, 0, 256, 256); const R = rng(4); for (let i = 0; i < 70; i++) { const x = R() * 256, y = R() * 256, r = 10 + R() * 30, gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, 'rgba(255,255,255,0.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(x - r, y - r, r * 2, r * 2); } const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(30, 30); t.colorSpace = THREE.SRGBColorSpace; return t; })();
-const surface = new THREE.Mesh(new THREE.PlaneGeometry(700, 700), new THREE.MeshBasicMaterial({ map: surfTex, color: 0xdff6ff, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }));
+// Seen from below, the surface shows the sky only inside Snell's window (a ~97° cone overhead); outside it mirrors the deep water.
+const surfU = { uTime: { value: 0 }, uNight: { value: 0 }, uFogD: { value: 0.02 }, uWater: { value: new Color() }, uSun: { value: new Vector3(20, 60, 10).normalize() } };
+const surface = new THREE.Mesh(new THREE.PlaneGeometry(700, 700, 1, 1), new THREE.ShaderMaterial({ uniforms: surfU, side: THREE.DoubleSide,
+  vertexShader: 'varying vec3 vW; void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }',
+  fragmentShader: `uniform float uTime, uNight, uFogD; uniform vec3 uWater, uSun; varying vec3 vW;
+    void main() {
+      vec3 d = normalize(vW - cameraPosition);
+      float rip = sin(vW.x * 1.3 + uTime * 1.6) * 0.5 + sin(vW.z * 1.7 - uTime * 1.2) * 0.5 + sin((vW.x + vW.z) * 0.6 + uTime) * 0.4;
+      float ct = d.y + rip * 0.02, inside = smoothstep(0.645, 0.675, ct), edge = smoothstep(0.6, 0.66, ct) * (1.0 - smoothstep(0.66, 0.72, ct));
+      float sd = max(dot(d, uSun), 0.0);
+      vec3 sky = mix(vec3(0.3, 0.58, 0.75), vec3(0.62, 0.8, 0.9), smoothstep(0.66, 1.0, ct)) + pow(sd, 350.0) * 4.0 + pow(sd, 18.0) * 0.25;
+      if (uNight > 0.5) sky = vec3(0.01, 0.02, 0.05) + pow(sd, 900.0) * 3.0 + pow(sd, 40.0) * 0.08;
+      vec3 mirror = uWater * (0.75 + 0.35 * (0.5 + 0.5 * rip));
+      vec3 col = mix(mirror, sky, inside) + edge * (uNight > 0.5 ? vec3(0.0) : vec3(0.1, 0.16, 0.2));
+      float dist = length(vW - cameraPosition), fogF = 1.0 - exp(-pow(uFogD * dist * 0.55, 2.0));
+      gl_FragColor = vec4(mix(col, uWater, fogF), 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }` }));
 surface.rotation.x = -Math.PI / 2; scene.add(surface);
 const shaftTex = (() => { const cv = makeCanvas(4, 128), g = cv.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#fff'); gr.addColorStop(1, '#000'); g.fillStyle = gr; g.fillRect(0, 0, 4, 128); return new THREE.CanvasTexture(cv); })();
 const shaftMat = new THREE.MeshBasicMaterial({ color: 0xfff8d8, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, alphaMap: shaftTex, side: THREE.DoubleSide, fog: false });
@@ -897,6 +926,7 @@ const diverModel = (() => {
   const beamGeo = new THREE.ConeGeometry(4.5, 18, 32, 1, true); beamGeo.translate(0, -9, 0);
   const beam = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({ color: 0xfff4dd, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, alphaMap: shaftTex, side: THREE.DoubleSide, fog: false }));
   beam.position.set(wr.x + 0.17, wr.y + 0.01, wr.z); beam.rotation.z = Math.PI / 2; grp.add(beam);
+  grp.traverse(o => { if (o.isMesh && o !== beam) o.castShadow = true; });
   scene.add(grp);
   function animate(kick, time, torchK) {   // flutter kick: hips swing, knees bend on the up-stroke, fins lag and flex
     for (const L of legs) {
@@ -933,7 +963,7 @@ let diveStats = { start: 0, maxDepth: 0, warnings: [], extra: [] };
 
 function startDive(s) {
   site = s; diveId = Date.now(); audio.init(); { const [v, deg] = s.current || [0, 0], a = deg * Math.PI / 180; curBase.set(Math.sin(a) * v, 0, -Math.cos(a) * v); } dayLight = diveOpts.night ? 0.012 : 1;
-  surface.material.color.set(diveOpts.night ? 0x1c2a3c : 0xdff6ff); CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
+CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
   $('computer').hidden = !diveOpts.realistic;
   pool = species.filter(sp => !sp.host);
   hosts = species.filter(sp => sp.host);
@@ -1042,7 +1072,11 @@ function stepCreature(c, dt, dSpeed) {
     if (sp.mood === 'hide') { const near = dist < 3 + dSpeed * 1.5; c.hide = lerp(c.hide, near ? 1 : 0, Math.min(1, dt * (near ? 6 : 0.5))); }
     c.ph += dt * c.kind.freq; return;
   }
-  const spd = speedOf(sp) * (c.rest ? 0.35 : 1), up = c.kind.upright;
+  if (sp.bait && !c.leader && t > (c.ballCheck || 0)) {   // a predator nearby turns the school into a bait ball
+    c.ballCheck = t + 0.5;
+    if (mobile.some(o => (o.sp.pred || o.hunter) && o.size > 0.5 && o.p.distanceToSquared(c.p) < 225)) c.ballUntil = t + 8;
+  }
+  const spd = speedOf(sp) * (c.rest ? 0.35 : 1) * (c.ballUntil > t && !c.leader ? 0.2 : 1), up = c.kind.upright;
   let urgency = 1.5;
   if (c.sleep) { c.v.multiplyScalar(0.9); c.ph += dt * 0.5; return; }
   _des.set(0, 0, 0);
@@ -1090,9 +1124,17 @@ function stepCreature(c, dt, dSpeed) {
   } else if (t >= c.flee) c.fleeFrom = null;
   if (_des.lengthSq() === 0) {
     if (c.leader && !c.leader.dead) {
-      const L = c.leader; _v2.copy(c.off).applyAxisAngle(UP, L.yaw);
-      _des.copy(L.p).add(_v2).add(_v.set(Math.sin(t * 0.7 + c.ph) * 0.3, Math.cos(t * 0.5 + c.ph) * 0.15, 0)).sub(c.p).multiplyScalar(1.4);
-      if (_des.length() > spd * 2.5) _des.setLength(spd * 2.5);
+      const L = c.leader;
+      if (L.ballUntil > t) {   // bait ball: pack into a sphere and swirl around the leader
+        if (!c.ballOff) c.ballOff = new Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).setLength((1.2 + sp.size * 9) * Math.cbrt(Math.random()));
+        _v2.copy(c.ballOff).applyAxisAngle(UP, t * 0.9 / (0.5 + c.ballOff.length()));
+        _des.copy(L.p).add(_v2).sub(c.p).multiplyScalar(2.5);
+        if (_des.length() > spd * 3) _des.setLength(spd * 3);
+      } else {
+        _v2.copy(c.off).applyAxisAngle(UP, L.yaw);
+        _des.copy(L.p).add(_v2).add(_v.set(Math.sin(t * 0.7 + c.ph) * 0.3, Math.cos(t * 0.5 + c.ph) * 0.15, 0)).sub(c.p).multiplyScalar(1.4).add(L.v);   // match the leader's heading
+        if (_des.length() > spd * 2.5) _des.setLength(spd * 2.5);
+      }
     } else {
       if (c.leader) c.leader = null;
       if (t > c.next || c.p.distanceTo(c.tgt) < 0.8) {
@@ -1220,10 +1262,14 @@ function frame(now, manual) {
   hemi.color.set(mix('#ffffff', water, 0.3)); hemi.groundColor.set(mix(water, '#000000', 0.6)); hemi.intensity = 0.04 + 1.0 * amb; scene.environmentIntensity = 0.02 + 0.9 * amb;
   sun.color.set(mix('#fff2dc', '#6fcbe6', clamp(depth / 40, 0, 1))); sun.intensity = 2.6 * amb;
   sun.position.copy(diver.p).add(_v.set(20, 60, 10)); sun.target.position.copy(diver.p);
+  const shadowsOn = settings.shadows && !diveOpts.night && depth < 45;   // only where sunlight is strong enough to cast them
+  sun.castShadow = settings.shadows; renderer.shadowMap.autoUpdate = shadowsOn; sun.shadow.intensity = shadowsOn ? 0.75 : 0;
+  if (bloom) { const k = diveOpts.night ? 1 : clamp(depth / 300, 0, 1); bloom.strength = lerp(0.2, 1.1, k); bloom.threshold = lerp(1.1, 0.55, k); }   // only glow-bright things bloom in the sunlit shallows
   const torchK = clamp((dark - 0.35) / 0.4, 0, 1);
   torch.intensity = torchK * 45; torch.position.copy(diver.p).addScaledVector(f, 0.8); torch.target.position.copy(diver.p).addScaledVector(f, 20);
   diverLamp.intensity = torchK * 6; diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position);
-  surface.position.set(diver.p.x, 0, diver.p.z); surfTex.offset.set(t * 0.01, t * 0.006); surface.visible = camD < 150;
+  surface.position.set(diver.p.x, 0, diver.p.z); surface.visible = camD < 150;
+  surfU.uTime.value = t; surfU.uNight.value = diveOpts.night ? 1 : 0; surfU.uFogD.value = scene.fog.density; surfU.uWater.value.set(water);
   shafts.forEach(s => { s.visible = depth < 90 && !diveOpts.night; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
   shaftMat.opacity = 0.07 * clamp(1 - depth / 80, 0, 1);
   floor.visible = depth > FLOOR - 400; floor.position.set(Math.round(diver.p.x / 50) * 50, -FLOOR, Math.round(diver.p.z / 50) * 50);
@@ -1296,7 +1342,7 @@ function frame(now, manual) {
   sparks.geometry.setDrawRange(0, kn); sparks.geometry.attributes.position.needsUpdate = sparks.geometry.attributes.color.needsUpdate = true;
 
   CAUST.uTime.value = t;
-  renderer.render(scene, camera);
+  renderFrame();
 
   if ((audioT -= dt) < 0) { audioT = 0.5; let wn = false, sn = false; for (const c of mobile) if (c.sp.type === 'whale' && !c.sp.f?.dolphin && !c.sp.f?.sealion && !c.sp.f?.dugong) { const dd = c.p.distanceTo(diver.p); if (dd < 250) { wn = true; if (c.sp.id === 'sperm' && dd < 120) sn = true; } } audio.update(depth, t, wn, sn); }
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
@@ -1407,7 +1453,7 @@ function summon(sp) {
   } else {
     const p = diver.p.clone().addScaledVector(f, Math.max(4, sp.size * 1.2 + 3)); pushOut(p, 0.5);
     const lead = makeCreature(sp, p); summoned.push(lead);
-    const n = sp.school ? Math.min(sp.school[1], 14) - 1 : 0, spread = Math.max(0.6, sp.size * 4);
+    const n = sp.school ? Math.min(sp.school[1], 40) - 1 : 0, spread = Math.max(0.6, sp.size * 4);
     for (let i = 0; i < n; i++) { const off = new Vector3((Math.random() - 0.5) * spread * 2, (Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread * 2); summoned.push(makeCreature(sp, p.clone().add(off), { leader: lead, off })); }
   }
   toast(`${label(sp)} is here — look ahead`);
@@ -1571,7 +1617,7 @@ async function shoot() {
   const useStrobe = ambient(-diver.p.y) < 0.75;   // auto strobe: on everywhere but the bright shallows
   if (useStrobe) { strobe.position.copy(camera.position).addScaledVector(forward(), 0.3); strobe.intensity = 160; }
   const shot = analyzeFrame(useStrobe);
-  renderer.render(scene, camera);
+  renderFrame();
   const src = renderer.domElement, W = 960, H = 540, cv = makeCanvas(W, H), g = cv.getContext('2d');
   let cw = src.width, ch = cw * H / W; if (ch > src.height) { ch = src.height; cw = ch * W / H; }
   g.drawImage(src, (src.width - cw) / 2, (src.height - ch) / 2, cw, ch, 0, 0, W, H);
@@ -1844,7 +1890,7 @@ for (const [id, key, ev] of [['set-hide', 'hideNames', 'checked'], ['set-sound',
 $('set-reset').onclick = () => { if (!confirm('Reset your logbook, badges and goals? Photos are kept but become unidentified again.')) return; progress.discovered = {}; progress.badges = {}; progress.goals = {}; progress.targets = {}; saveProgress(); for (const p of photos) { p.researched = false; delete p.identified; photoDB.put(p); } toast('Progress reset'); };
 function applySettings() { applyGraphics(); applyAudio(); applyTouch(); renderSitePicker(); }
 // filled in by later features
-function applyGraphics() {} function applyAudio() { audio.apply(); } function applyTouch() {}
+function applyGraphics() { renderer.shadowMap.needsUpdate = true; } function applyAudio() { audio.apply(); } function applyTouch() {}
 function checkGoals() {} function renderGoalsInto(el) { el.innerHTML = ''; }
 
 
