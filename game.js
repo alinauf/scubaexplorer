@@ -1966,7 +1966,8 @@ addEventListener('mousemove', e => {
   if (e.target === canvas) mouseNDC = { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight) * 2 + 1 };
   if (drag) { drag.moved += Math.abs(e.movementX) + Math.abs(e.movementY); look(e.movementX, e.movementY); }
 });
-$('help-close').onclick = () => { $('help').hidden = true; };
+$('help-close').onclick = $('help-x').onclick = () => { $('help').hidden = true; };
+$('help').onclick = e => { if (e.target === $('help')) $('help').hidden = true; };   // click outside the card to close
 $('open-help').onclick = () => { $('help').hidden = false; };
 
 // ---------- touch controls ----------

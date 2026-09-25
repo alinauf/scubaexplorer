@@ -67,10 +67,11 @@
   .card dt { color: #7fb6d0; } .card dd { margin: 0; }
   .card p { margin: 0 0 12px; }
 
-  #help { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 8, 16, 0.55); padding: 16px; }
-  #help .card { position: relative; max-width: 520px; background: rgba(4, 24, 42, 0.97); }
-  #help ul { margin: 0 0 16px; padding: 0; list-style: none; display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; }
-  #help li { display: contents; }
+  #help { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 8, 16, 0.55); padding: 16px; z-index: 5; }
+  #help .card { position: relative; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: rgba(4, 24, 42, 0.97); }
+  #help ul { margin: 0 0 16px; padding: 0; list-style: none; display: grid; gap: 10px; }
+  #help li { display: grid; grid-template-columns: 150px 1fr; gap: 12px; align-items: baseline; }
+  #help .keys { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; color: #8fb8cc; }
 
   #guide { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 8, 16, 0.6); padding: 16px; }
   .guide-box { width: min(1060px, 100%); height: min(760px, calc(100vh - 32px)); display: flex; flex-direction: column; background: rgba(4, 24, 42, 0.97); overflow: hidden; }
@@ -296,21 +297,22 @@
 
 <div id="help" hidden>
   <div class="card glass">
+    <button id="help-x" class="x" aria-label="Close">×</button>
     <h2>How to dive</h2>
     <p style="color:#b8dcee">You start at the edge of the reef. Swim out over the drop-off and you can keep going down through every ocean zone to the trench floor.</p>
     <ul>
-      <li><kbd>Mouse</kbd> / <kbd>Arrows</kbd><span>Look around. Click the water to lock the mouse (<kbd>Esc</kbd> releases it), drag to look, or use the arrow keys.</span></li>
-      <li><kbd>W A S D</kbd><span>Swim forward, back and sideways in the direction you're looking</span></li>
-      <li><kbd>Space</kbd> <kbd>C</kbd><span>Rise and sink</span></li>
-      <li><kbd>Shift</kbd><span>Dive fast (gets faster the deeper you are)</span></li>
-      <li><kbd>Click</kbd> / <kbd>E</kbd><span>Learn about the animal in your crosshair</span></li>
-      <li><kbd>F</kbd><span>Raise or lower your underwater camera. Click or press <kbd>Enter</kbd> to take a photo; scroll or <kbd>+</kbd>/<kbd>−</kbd> to zoom. The strobe fires automatically once it gets dim.</span></li>
-      <li><kbd>P</kbd><span>Photo log: every shot, graded ★–★★★. Subjects stay unidentified until you research them on land.</span></li>
-      <li><kbd>G</kbd><span>Fish guide: browse every species and summon any of them</span></li>
-      <li><kbd>V</kbd><span>Switch between first- and third-person view</span></li>
+      <li><span class="keys"><kbd>Mouse</kbd> / <kbd>Arrows</kbd></span><span>Look around. Click the water to lock the mouse (<kbd>Esc</kbd> releases it), drag to look, or use the arrow keys.</span></li>
+      <li><span class="keys"><kbd>W A S D</kbd></span><span>Swim forward, back and sideways in the direction you're looking</span></li>
+      <li><span class="keys"><kbd>Space</kbd> <kbd>C</kbd></span><span>Rise and sink</span></li>
+      <li><span class="keys"><kbd>Shift</kbd></span><span>Dive fast (gets faster the deeper you are)</span></li>
+      <li><span class="keys"><kbd>Click</kbd> / <kbd>E</kbd></span><span>Learn about the animal in your crosshair</span></li>
+      <li><span class="keys"><kbd>F</kbd></span><span>Raise or lower your underwater camera. Click or press <kbd>Enter</kbd> to take a photo; scroll or <kbd>+</kbd>/<kbd>−</kbd> to zoom. The strobe fires automatically once it gets dim.</span></li>
+      <li><span class="keys"><kbd>P</kbd></span><span>Photo log: every shot, graded ★–★★★. Subjects stay unidentified until you research them on land.</span></li>
+      <li><span class="keys"><kbd>G</kbd></span><span>Fish guide: browse every species and summon any of them</span></li>
+      <li><span class="keys"><kbd>V</kbd></span><span>Switch between first- and third-person view</span></li>
     </ul>
     <p style="color:#b8dcee;font-size:14px">Rush at shy fish and they scatter. Stay calm and curious animals like turtles, batfish and Napoleon wrasse come to you. Puffers inflate, garden eels hide in the sand, and sharks hunt smaller fish.</p>
-    <button id="help-close" class="btn primary">Start diving</button>
+    <button id="help-close" class="btn primary">Start diving</button> <span style="color:#8fb8cc;font-size:13px">or press <kbd>Esc</kbd></span>
   </div>
 </div>
 
