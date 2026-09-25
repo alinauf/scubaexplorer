@@ -2,7 +2,7 @@
 const assert = require('assert');
 const { sites, species } = require('./data.js');
 const S = new Map(species.map(s => [s.id, s]));
-const TYPES = 'fish shark ray turtle whale eel jelly squid octopus cuttle seahorse nautilus siphonophore pyrosome crust cuke star nudi sunfish clam xeno brain table branch fan anemone sponge softcoral black glass bamboo crinoid seapen mushroom'.split(' ');
+const TYPES = 'fish shark ray turtle whale eel jelly squid octopus cuttle seahorse nautilus siphonophore pyrosome crust cuke star nudi sunfish clam xeno brain table branch fan anemone sponge softcoral black glass bamboo crinoid seapen mushroom massive scroll bubble leather cups whip digitate grass algae tubes xmas'.split(' ');
 assert.strictEqual(S.size, species.length, 'duplicate species id');
 for (const s of species) {
   assert(TYPES.includes(s.type), `${s.id}: bad type ${s.type}`);
