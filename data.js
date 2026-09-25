@@ -1,6 +1,6 @@
 // Real dive sites and real species. Depths in metres, sizes in metres (typical adult length; wingspan for rays).
 // regions: where it lives — MV Maldives, EG Egypt (Red Sea), ID Indonesia, AU Australia, PW Palau, 'all' (widespread incl. the Maldives)
-// or 'world' (not found in the Maldives; see range). pred = hunts other fish; mood = curious | puff | hide. tints = colour morphs for individuals.
+// or 'world' (not found in the Maldives; see range). Site current: [speed m/s, compass bearing it flows toward]. pred = hunts other fish; mood = curious | puff | hide. tints = colour morphs for individuals.
 // depth = recorded range, typ = where it's usually found, ab = how common (expected groups per 10 m of water).
 // iucn: LC NT VU EN CR DD (data deficient) NE (not evaluated).
 const REEF_DATA = {
@@ -8,12 +8,12 @@ const REEF_DATA = {
 
   sites: [
     // Maldives
-    { id: 'banana_reef', country: 'MV', name: 'Banana Reef', area: 'North Malé Atoll', desc: 'One of the Maldives\' first famous dive sites, named for its curved shape. Overhangs and caves are packed with bluestripe snappers and moray eels, while grey reef sharks and Napoleon wrasse patrol the outer edge.', featured: { grey_reef: 3, napoleon: 3, bluestripe_snapper: 2, giant_moray: 2 } },
-    { id: 'maaya_thila', country: 'MV', name: 'Maaya Thila', area: 'North Ari Atoll', desc: 'A small protected underwater pinnacle ("thila"). One of the world\'s most famous night dives, when whitetip reef sharks hunt in packs among the coral.', featured: { whitetip_reef: 5, green_turtle: 3, giant_moray: 2, grey_reef: 2, lionfish_miles: 2 } },
-    { id: 'hanifaru', country: 'MV', name: 'Hanifaru Bay', area: 'Baa Atoll (UNESCO Biosphere Reserve)', desc: 'A small bay that traps plankton in the southwest monsoon (May–November), drawing more than 100 feeding reef mantas at once plus whale sharks. To protect them, visitors may only snorkel here, not scuba dive.', featured: { reef_manta: 12, whale_shark: 6 } },
-    { id: 'maamigili', country: 'MV', name: 'South Ari MPA', area: 'Maamigili, South Ari Atoll', desc: 'One of the few places on Earth where whale sharks can be seen year-round — mostly young males cruising the outer reef.', featured: { whale_shark: 15, reef_manta: 2 } },
-    { id: 'fuvahmulah', country: 'MV', name: 'Tiger Zoo', area: 'Fuvahmulah', desc: 'A one-island atoll near the equator where tiger sharks are seen almost daily, along with thresher sharks, great hammerheads and oceanic mantas.', featured: { tiger: 15, pelagic_thresher: 5, great_hammer: 6, oceanic_manta: 5, scalloped_hammer: 2, silvertip: 2 } },
-    { id: 'rasdhoo', country: 'MV', name: 'Hammerhead Point (Madivaru)', area: 'Rasdhoo Atoll', desc: 'Divers drop into the blue at dawn off the outer wall, hoping to see schools of scalloped hammerheads rising from the depths.', featured: { scalloped_hammer: 12, grey_reef: 2, eagle_ray: 2 } },
+    { id: 'banana_reef', country: 'MV', current: [0.35, 60], name: 'Banana Reef', area: 'North Malé Atoll', desc: 'One of the Maldives\' first famous dive sites, named for its curved shape. Overhangs and caves are packed with bluestripe snappers and moray eels, while grey reef sharks and Napoleon wrasse patrol the outer edge.', featured: { grey_reef: 3, napoleon: 3, bluestripe_snapper: 2, giant_moray: 2 } },
+    { id: 'maaya_thila', country: 'MV', current: [0.5, 120], name: 'Maaya Thila', area: 'North Ari Atoll', desc: 'A small protected underwater pinnacle ("thila"). One of the world\'s most famous night dives, when whitetip reef sharks hunt in packs among the coral.', featured: { whitetip_reef: 5, green_turtle: 3, giant_moray: 2, grey_reef: 2, lionfish_miles: 2 } },
+    { id: 'hanifaru', country: 'MV', current: [0.15, 200], name: 'Hanifaru Bay', area: 'Baa Atoll (UNESCO Biosphere Reserve)', desc: 'A small bay that traps plankton in the southwest monsoon (May–November), drawing more than 100 feeding reef mantas at once plus whale sharks. To protect them, visitors may only snorkel here, not scuba dive.', featured: { reef_manta: 12, whale_shark: 6 } },
+    { id: 'maamigili', country: 'MV', current: [0.3, 90], name: 'South Ari MPA', area: 'Maamigili, South Ari Atoll', desc: 'One of the few places on Earth where whale sharks can be seen year-round — mostly young males cruising the outer reef.', featured: { whale_shark: 15, reef_manta: 2 } },
+    { id: 'fuvahmulah', country: 'MV', current: [0.7, 30], name: 'Tiger Zoo', area: 'Fuvahmulah', desc: 'A one-island atoll near the equator where tiger sharks are seen almost daily, along with thresher sharks, great hammerheads and oceanic mantas.', featured: { tiger: 15, pelagic_thresher: 5, great_hammer: 6, oceanic_manta: 5, scalloped_hammer: 2, silvertip: 2 } },
+    { id: 'rasdhoo', country: 'MV', current: [0.8, 240], name: 'Hammerhead Point (Madivaru)', area: 'Rasdhoo Atoll', desc: 'Divers drop into the blue at dawn off the outer wall, hoping to see schools of scalloped hammerheads rising from the depths.', featured: { scalloped_hammer: 12, grey_reef: 2, eagle_ray: 2 } },
   ],
 
   species: [

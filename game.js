@@ -932,7 +932,7 @@ const diveOpts = { night: false, realistic: false };
 let diveStats = { start: 0, maxDepth: 0, warnings: [], extra: [] };
 
 function startDive(s) {
-  site = s; diveId = Date.now(); dayLight = diveOpts.night ? 0.012 : 1;
+  site = s; diveId = Date.now(); { const [v, deg] = s.current || [0, 0], a = deg * Math.PI / 180; curBase.set(Math.sin(a) * v, 0, -Math.cos(a) * v); } dayLight = diveOpts.night ? 0.012 : 1;
   surface.material.color.set(diveOpts.night ? 0x1c2a3c : 0xdff6ff); CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
   $('computer').hidden = !diveOpts.realistic;
   pool = species.filter(sp => !sp.host);
@@ -1104,9 +1104,10 @@ function stepCreature(c, dt, dSpeed) {
       }
       _des.subVectors(c.tgt, c.p); if (_des.lengthSq() > 1e-6) _des.setLength(spd);
     }
+    if (!up) _des.addScaledVector(currentAt(c.p), -0.95);   // hold station: swim into the current
   }
   c.v.lerp(_des, Math.min(1, dt * urgency));
-  c.p.addScaledVector(c.v, dt);
+  c.p.addScaledVector(c.v, dt).addScaledVector(currentAt(c.p), dt);
   const d = -c.p.y; if (d < sp.depth[0] - 2) c.p.y = -(sp.depth[0] - 2); if (d > sp.depth[1] + 2) c.p.y = -(sp.depth[1] + 2);
   pushOut(c.p, 0.3 + c.size * 0.3);
   const sv = c.v.length();
@@ -1114,6 +1115,12 @@ function stepCreature(c, dt, dSpeed) {
   c.q.setFromEuler(_e.set(0, c.yaw, c.pitch, 'YZX'));
   c.ph += dt * c.kind.freq * (0.5 + Math.min(3, sv / Math.max(0.05, spd)) * 0.6);
 }
+
+// ---------- currents ----------
+// Strongest over the reef top, fading with depth, and surging slowly. Fish swim into it to hold station.
+const curBase = new Vector3(), _cur = new Vector3();
+function currentAt(p, out = _cur) { const k = clamp(1 - (-p.y - 25) / 80, 0.15, 1) * (0.85 + 0.15 * Math.sin(t * 0.25)); return out.copy(curBase).multiplyScalar(k); }
+const currentWord = v => v < 0.25 ? 'mild' : v < 0.55 ? 'moderate' : 'strong';
 
 // ---------- diver ----------
 function stepDiver(dt) {
@@ -1127,7 +1134,7 @@ function stepDiver(dt) {
   _des.set(0, 0, 0).addScaledVector(f, fw).addScaledVector(r, st).add(_v.set(0, vt, 0));
   if (_des.lengthSq() > 0) _des.setLength(max);
   diver.v.lerp(_des, Math.min(1, dt * (turbo ? 3 : 2.2)));
-  diver.p.addScaledVector(diver.v, dt);
+  diver.p.addScaledVector(diver.v, dt).addScaledVector(currentAt(diver.p), dt);
   pushOut(diver.p, 0.9);
   diver.kick += dt * (1.5 + diver.v.length() * (turbo ? 0.3 : 2.5));
   if ((diver.breath -= dt) < 0 && depth > 1.5) { diver.breath = 3.5; for (let i = 0; i < 8; i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
@@ -1261,13 +1268,13 @@ function frame(now, manual) {
   // marine snow wraps around the camera
   const sp = snow.geometry.attributes.position.array, ox = cam.x - 20, oy = cam.y - 20, oz = cam.z - 20;
   for (let i = 0; i < SNOW; i++) {
-    const bx = snowBase[i * 3], by = snowBase[i * 3 + 1] - t * 0.08, bz = snowBase[i * 3 + 2];
+    const bx = snowBase[i * 3] + curBase.x * t * 0.8, by = snowBase[i * 3 + 1] - t * 0.08, bz = snowBase[i * 3 + 2] + curBase.z * t * 0.8;
     sp[i * 3] = ox + (((bx - ox) % 40) + 40) % 40; sp[i * 3 + 1] = oy + (((by - oy) % 40) + 40) % 40; sp[i * 3 + 2] = oz + (((bz - oz) % 40) + 40) % 40;
   }
   snow.geometry.attributes.position.needsUpdate = true; snow.material.opacity = 0.2 + 0.4 * clamp(depth / 150, 0, 1);
   // bubbles & bits
   const bp = bubbles.geometry.attributes.position.array; let bn = 0;
-  for (const b of bubbleList) { b.age += dt; if (b.age > 0) { b.p.y += dt * (0.8 + b.s * 0.3); b.p.x += Math.sin(b.age * 6 + b.s * 9) * dt * 0.2; } }
+  for (const b of bubbleList) { b.age += dt; if (b.age > 0) { b.p.y += dt * (0.8 + b.s * 0.3); b.p.x += Math.sin(b.age * 6 + b.s * 9) * dt * 0.2; b.p.addScaledVector(currentAt(b.p), dt); } }
   for (let i = bubbleList.length - 1; i >= 0; i--) if (bubbleList[i].p.y > -0.1 || bubbleList[i].age > 14) bubbleList.splice(i, 1);
   for (const b of bubbleList) if (b.age > 0 && bn < 200) { bp[bn * 3] = b.p.x; bp[bn * 3 + 1] = b.p.y; bp[bn * 3 + 2] = b.p.z; bn++; }
   bubbles.geometry.setDrawRange(0, bn); bubbles.geometry.attributes.position.needsUpdate = true;
@@ -1332,6 +1339,8 @@ function updateHud() {
   const light = ambient(d) * 100;
   $('light').textContent = light >= 1 ? `${light.toFixed(0)}%` : light >= 0.01 ? `${light.toFixed(2)}%` : 'none';
   $('nearby').textContent = live.filter(c => !c.fixed && c.p.distanceToSquared(diver.p) < 900).length;
+  const cu = currentAt(diver.p), cv = cu.length();
+  $('cur').innerHTML = cv < 0.03 ? 'none' : `<span class="arrow" style="transform:rotate(${Math.atan2(cu.x * Math.sin(diver.yaw) + cu.z * Math.cos(diver.yaw), cu.x * Math.cos(diver.yaw) - cu.z * Math.sin(diver.yaw)) * 180 / Math.PI}deg)">↑</span> ${currentWord(cv)} · ${cv.toFixed(1)} m/s`;
   $('gauge-mark').style.top = `${gaugePos(d) * 100}%`;
 }
 
@@ -1839,7 +1848,7 @@ function renderSitePicker() {
     const stars = [...new Set(Object.entries(s.featured).sort((a, b) => b[1] - a[1]).map(([id]) => label(SP[id])))].slice(0, 4);
     el.innerHTML = '<b></b><small></small><p></p><em></em><span class="go">Dive here →</span>';
     el.querySelector('b').textContent = s.name; el.querySelector('small').textContent = s.area;
-    el.querySelector('p').textContent = s.desc; el.querySelector('em').textContent = 'Look for: ' + stars.join(', ');
+    el.querySelector('p').textContent = s.desc; el.querySelector('em').textContent = `Look for: ${stars.join(', ')} · Current: ${currentWord(s.current?.[0] || 0)}`;
     el.onclick = () => startDive(s); $('sites').appendChild(el);
   }
   for (const b of $('opt-time').querySelectorAll('button')) b.classList.toggle('on', (b.dataset.v === 'night') === diveOpts.night);
