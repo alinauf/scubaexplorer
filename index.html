@@ -126,6 +126,14 @@
   #pv-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(255,216,74,.1); border: 1px solid rgba(255,216,74,.3); font-size: 14px; }
   #pv .row { display: flex; gap: 8px; margin-top: auto; } #pv .row > * { flex: 1; text-align: center; text-decoration: none; }
 
+  /* dive computer */
+  #computer { position: absolute; left: 16px; top: 250px; width: 230px; padding: 10px 14px; font-variant-numeric: tabular-nums; font-size: 13px; }
+  #computer h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: #7fe0ff; }
+  #computer.alarm { border-color: #ff5a5a; box-shadow: 0 0 0 2px rgba(255,90,90,.5); }
+  #computer dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; } #computer dt { color: #8fb8cc; } #computer dd { margin: 0; text-align: right; }
+  .airbar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.12); margin: 2px 0 6px; overflow: hidden; }
+  #c-airbar { height: 100%; background: #4be07a; } #c-airbar.mid { background: #ffd84a; } #c-airbar.low { background: #ff5a5a; }
+  #c-rate.bad { color: #ff5a5a; font-weight: 700; } #c-stop { margin-top: 6px; color: #ffd84a; min-height: 1em; }
   /* dive setup */
   #setup { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin: 0 0 10px; }
   .seg-ctl { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(3, 16, 31, 0.6); border: 1px solid #1d5a80; }
@@ -235,6 +243,12 @@
       <dt>Sunlight</dt><dd id="light"></dd>
       <dt>Animals near you</dt><dd id="nearby"></dd>
     </dl>
+  </div>
+  <div id="computer" class="glass" hidden>
+    <h4>Dive computer</h4>
+    <dl><dt>Air</dt><dd id="c-air"></dd></dl><div class="airbar"><div id="c-airbar"></div></div>
+    <dl><dt id="c-ndl-k">No-deco</dt><dd id="c-ndl"></dd><dt>Dive time</dt><dd id="c-time"></dd><dt>Ascent</dt><dd id="c-rate"></dd></dl>
+    <div id="c-stop"></div>
   </div>
   <div id="buttons">
     <button id="open-camera" class="btn primary">Camera (F)</button>

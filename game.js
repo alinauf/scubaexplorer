@@ -923,15 +923,18 @@ const saveSettings = () => store.set('scuba-settings', settings), saveProgress =
 const kindName = sp => (sp.kind || (CORAL.has(sp.type) ? 'coral' : KIND[sp.type])).toLowerCase();
 const known = sp => !settings.hideNames || !!progress.discovered[sp.id];   // research mode hides names until you identify a photo
 const label = sp => known(sp) ? sp.name : `Unknown ${kindName(sp)}`;
+const an = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w, cap = w => w[0].toUpperCase() + w.slice(1);
 const diveOpts = { night: false, realistic: false };
 let diveStats = { start: 0, maxDepth: 0, warnings: [], extra: [] };
 
 function startDive(s) {
   site = s; diveId = Date.now(); diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
+  $('computer').hidden = !diveOpts.realistic;
   pool = species.filter(sp => !sp.host);
   hosts = species.filter(sp => sp.host);
   cells = new Map(); summoned = [];
-  diver.p.set(edgeX(0) + 7, -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;
+  diver.p.set(edgeX(0) + 7, diveOpts.realistic ? -0.5 : -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;   // realistic dives start at the surface
+  resetComputer();
   $('site-name').textContent = `${s.name} · ${s.area}`;
   $('picker').hidden = true; $('land').hidden = true; $('hud').hidden = false; closeCard();
   updateTiles(true);
@@ -1059,7 +1062,7 @@ function stepCreature(c, dt, dSpeed) {
         if (dd < c.size * 0.35 + pr.size * 0.5 + 0.1) {
           kill(pr); c.prey = null; c.full = t + 25 + Math.random() * 25;
           for (let i = 0; i < 25; i++) bitList.push({ p: pr.p.clone(), v: new Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(1.5), age: 0 });
-          if (c.p.distanceTo(diver.p) < 35 && t > lastCatchToast + 3) lastCatchToast = t, toast(`${sp.type === 'shark' ? '🦈' : '🐟'} A ${label(sp).toLowerCase()} caught a ${label(pr.sp).toLowerCase()}!`);
+          if (c.p.distanceTo(diver.p) < 35 && t > lastCatchToast + 3) lastCatchToast = t, toast(`${sp.type === 'shark' ? '🦈' : '🐟'} ${cap(an(label(sp).toLowerCase()))} caught ${an(label(pr.sp).toLowerCase())}!`);
         }
       }
     }
@@ -1103,7 +1106,7 @@ function stepDiver(dt) {
   diver.yaw -= lx * dt * 1.8; diver.pitch = clamp(diver.pitch + ly * dt * 1.3, -1.45, 1.45);   // arrow keys look around
   const vt = (keys.Space ? 1 : 0) - (keys.KeyC || keys.ControlLeft ? 1 : 0);
   const turbo = keys.ShiftLeft || keys.ShiftRight, depth = -diver.p.y;
-  const max = turbo ? 12 + depth * 0.05 : 1.8;   // turbo scales with depth so the trenches are reachable
+  const max = diveOpts.realistic ? (turbo ? 2.2 : 1.1) : turbo ? 12 + depth * 0.05 : 1.8;   // explorer turbo scales with depth so the trenches are reachable
   _des.set(0, 0, 0).addScaledVector(f, fw).addScaledVector(r, st).add(_v.set(0, vt, 0));
   if (_des.lengthSq() > 0) _des.setLength(max);
   diver.v.lerp(_des, Math.min(1, dt * (turbo ? 3 : 2.2)));
@@ -1113,17 +1116,54 @@ function stepDiver(dt) {
   if ((diver.breath -= dt) < 0 && depth > 1.5) { diver.breath = 3.5; for (let i = 0; i < 8; i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
 }
 
+// ---------- dive computer (realistic mode) ----------
+// Air: 11.1 L tank at 200 bar, 20 L/min at the surface × ambient pressure. No-decompression limits: recreational air tables.
+const NDL = [[10, 219], [12, 147], [14, 98], [16, 72], [18, 56], [20, 45], [22, 37], [25, 29], [30, 20], [35, 14], [40, 9], [42, 8], [45, 5], [50, 3], [56, 2], [1e9, 1]];
+const ndlAt = d => { if (d < 10) return Infinity; for (let i = 1; i < NDL.length; i++) if (d <= NDL[i][0]) return lerp(NDL[i - 1][1], NDL[i][1], (d - NDL[i - 1][0]) / (NDL[i][0] - NDL[i - 1][0])); return 1; };
+let comp = null;
+function resetComputer() { comp = { air: 200, load: 0, safety: 0, fastAscent: 0, warned: {}, outOfAir: false, lastD: -diver.p.y }; }
+function warnOnce(key, msg) { if (!comp.warned[key]) { comp.warned[key] = true; toast(`⚠️ ${msg}`); diveStats.warnings.push(msg); } }
+function stepComputer(dt) {
+  const d = -diver.p.y, amb = 1 + d / 10, moving = diver.v.length(), turbo = keys.ShiftLeft || keys.ShiftRight;
+  comp.air = Math.max(0, comp.air - (20 / 60) * amb * (turbo ? 1.8 : moving > 0.3 ? 1.25 : 1) * dt / 11.1);
+  const ndl = ndlAt(d);
+  if (ndl < Infinity) comp.load += dt / 60 / ndl; else comp.load = Math.max(comp.load > 1 ? 1 : 0, comp.load - dt / 60 / 45);   // slow off-gassing in the shallows
+  if (comp.load > 1 && d >= 2.5 && d <= 6.5) comp.load = Math.max(1, comp.load - dt / 60 / 30 * 2);   // a decompression stop pays the debt down
+  if (comp.load > 1 && d < 2.5 && comp.load > 1.01) warnOnce('deco', 'Surfaced with a decompression obligation — high risk of decompression sickness');
+  if (diveStats.maxDepth > 10 && d >= 2.5 && d <= 6.5) comp.safety += dt;
+  if (d < 1.5 && diveStats.maxDepth > 10 && comp.safety < 180) warnOnce('safety', 'Skipped the 3-minute safety stop at 5 m');
+  const rate = (comp.lastD - d) / dt * 60; comp.lastD = d; comp.rate = lerp(comp.rate || 0, rate, 0.1);   // m/min, + means ascending
+  if (comp.rate > 9 && d > 3) { comp.fastAscent += dt; if (comp.fastAscent > 2) warnOnce('ascent', 'Ascended faster than 9 m/min'); } else comp.fastAscent = 0;
+  if (d > 30) warnOnce('narcosis', 'Below 30 m: nitrogen narcosis can cloud your judgement');
+  if (d > 40) warnOnce('rec', 'Below 40 m: beyond the recreational depth limit');
+  if (d > 56) warnOnce('ox', 'Below 56 m: oxygen toxicity risk when breathing air');
+  if (comp.air < 50) warnOnce('reserve', 'Air at 50 bar — reserve. Start your ascent');
+  if (comp.air <= 0 && !comp.outOfAir) { comp.outOfAir = true; diveStats.warnings.push('Ran out of air — emergency ascent'); toast('🚨 Out of air! Emergency ascent'); }
+  if (comp.outOfAir) { diver.p.y = Math.min(-0.3, diver.p.y + dt * 1.5); if (d < 1) { endDive(); } }
+}
+function updateComputer() {
+  const d = -diver.p.y, ndl = ndlAt(d), mm = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  $('c-air').textContent = `${Math.round(comp.air)} bar`; $('c-airbar').style.width = `${comp.air / 2}%`; $('c-airbar').className = comp.air < 50 ? 'low' : comp.air < 100 ? 'mid' : '';
+  $('c-time').textContent = mm(t - diveStats.start);
+  if (comp.load > 1) { $('c-ndl-k').textContent = 'DECO'; $('c-ndl').textContent = `stop at 3–6 m · ${Math.ceil((comp.load - 1) * 15)} min`; $('computer').classList.add('alarm'); }
+  else { $('c-ndl-k').textContent = 'No-deco'; $('c-ndl').textContent = ndl === Infinity ? '—' : `${Math.max(0, Math.floor((1 - comp.load) * ndl))} min`; $('computer').classList.remove('alarm'); }
+  const r = comp.rate || 0; $('c-rate').textContent = `${r > 0 ? '▲' : r < 0 ? '▼' : ''} ${Math.abs(r).toFixed(0)} m/min`; $('c-rate').className = r > 9 ? 'bad' : '';
+  const needStop = diveStats.maxDepth > 10 && comp.safety < 180;
+  $('c-stop').textContent = comp.load > 1 ? 'Decompression stop' : needStop ? (d <= 6.5 && d >= 2.5 ? `Safety stop ${mm(180 - comp.safety)}` : 'Safety stop needed at 5 m') : diveStats.maxDepth > 10 ? 'Safety stop done ✓' : '';
+}
+
 // ---------- main loop ----------
 const _mat = new Matrix4(), _pos = new Vector3(), _scl = new Vector3();
 let last = performance.now(), hudT = 0, pickT = 0, aimed = null, fps = 60;
 let frameMs = 0;
-function frame(now) {
-  requestAnimationFrame(frame);
+function frame(now, manual) {
+  if (!manual) requestAnimationFrame(frame);
   const f0 = performance.now();
-  const dt = Math.min(0.05, (now - last) / 1000); last = now; fps = lerp(fps, 1 / Math.max(dt, 0.001), 0.05);
+  const dt = manual > 0 ? manual : Math.min(0.05, (now - last) / 1000); last = now; fps = lerp(fps, 1 / Math.max(dt, 0.001), 0.05);
   if (!site) return;
   t += dt;
-  if (!uiOpen()) stepDiver(dt);
+  if (!uiOpen()) { stepDiver(dt); if (diveOpts.realistic && site) stepComputer(dt); }
+  if (!site) return;
   updateCells(); updateTiles();
   live.length = 0;
   for (const c of cells.values()) { if (anyDead) c.list = c.list.filter(x => !x.dead); for (const x of c.list) live.push(x); }
@@ -1222,7 +1262,7 @@ function frame(now) {
   renderer.render(scene, camera);
 
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
-  if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); }
+  if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); if (diveOpts.realistic) updateComputer(); }
   if (camMode && (camT -= dt) < 0) {
     camT = 0.15; framing = analyzeFrame(ambient(depth) < 0.75); const b = framing.best;
     $('vf-focus').className = b ? (framing.stars >= 3 ? 'good' : 'ok') : '';
@@ -1307,6 +1347,7 @@ $('card-more').onclick = () => { if (cardSp) summon(cardSp); };
 function summon(sp) {
   closeCard(); $('guide').hidden = true;
   const d0 = -diver.p.y;
+  if (diveOpts.realistic && (d0 < sp.depth[0] - 2 || d0 > sp.depth[1] + 2)) { toast(`In realistic mode you have to swim to where it lives: ${sp.depth[0].toLocaleString()}–${sp.depth[1].toLocaleString()} m`); return; }
   if (d0 < sp.depth[0] || d0 > sp.depth[1]) {
     const typ = sp.typ || sp.depth, d = clamp((typ[0] + typ[1]) / 2, 1, FLOOR - 3), z = diver.p.z;
     if (d <= topDepth(z) + 0.5) diver.p.set(edgeX(z) + 6, -d, z);
@@ -1364,7 +1405,7 @@ function renderGuide() {
   if (gSel) {
     fillCard('g-', gSel);
     const d = -diver.p.y, ok = d >= gSel.depth[0] && d <= gSel.depth[1], typ = gSel.typ || gSel.depth;
-    $('g-summon').textContent = ok ? 'Summon near me' : `Dive to ${Math.round(clamp((typ[0] + typ[1]) / 2, 1, FLOOR - 3)).toLocaleString()} m and summon`;
+    $('g-summon').textContent = ok ? 'Summon near me' : diveOpts.realistic ? `Lives at ${gSel.depth[0].toLocaleString()}–${gSel.depth[1].toLocaleString()} m — swim there first` : `Dive to ${Math.round(clamp((typ[0] + typ[1]) / 2, 1, FLOOR - 3)).toLocaleString()} m and summon`;
   }
 }
 $('g-summon').onclick = () => { if (gSel) summon(gSel); };
@@ -1506,8 +1547,9 @@ canvas.addEventListener('wheel', e => { if (!camMode) return; e.preventDefault()
 
 // ---------- dive summary ----------
 function endDive() {
-  if (diveOpts.realistic && -diver.p.y > 2) { toast(`Ascend to the surface to end the dive — you're at ${Math.round(-diver.p.y)} m`); return; }
+  if (diveOpts.realistic && -diver.p.y > 2 && !comp.outOfAir) { toast(`Ascend to the surface to end the dive — you're at ${Math.round(-diver.p.y)} m`); return; }
   const shots = photos.filter(p => p.dive === diveId), mins = Math.max(1, Math.round((t - diveStats.start) / 60));
+  if (diveOpts.realistic) diveStats.extra = [['Air used', `${Math.round(200 - comp.air)} bar (${Math.round(comp.air)} bar left)`], ['Safety stop', diveStats.maxDepth <= 10 ? 'not needed' : comp.safety >= 180 ? 'done ✓' : 'skipped']];
   $('sum-title').textContent = `${site.name} · ${diveOpts.night ? 'night' : 'day'} dive`;
   const rows = [['Mode', diveOpts.realistic ? 'Realistic' : 'Explorer'], ['Dive time', `${mins} min`], ['Max depth', `${Math.round(diveStats.maxDepth).toLocaleString()} m`],
     ['Photos', `${shots.length}${shots.length ? ` · ${shots.filter(p => p.stars === 3).length} three-star` : ''}`],
@@ -1785,6 +1827,6 @@ $('opt-mode').onclick = e => { const v = e.target.closest('button')?.dataset.v; 
 renderSitePicker();
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
-window.scuba = { CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
+window.scuba = { step: (n, dt = 1 / 30) => { for (let i = 0; i < n; i++) frame(performance.now(), dt); }, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
 requestAnimationFrame(frame);
 })();
