@@ -44,7 +44,8 @@ const fbm = (x, z) => vnoise(x, z) * 0.6 + vnoise(x * 2.1 + 5.2, z * 2.1) * 0.3 
 const zoneOf = d => ZONES.find(z => d < z[1]) || ZONES[ZONES.length - 1];
 const WATER = [[0, '#3fb4d6'], [15, '#2596bf'], [40, '#16709c'], [120, '#0b4470'], [300, '#062540'], [800, '#031222'], [1500, '#010812'], [5000, '#01040a'], [11000, '#000205']];
 const ROCK = [[0, '#9a8c78'], [30, '#7a6e62'], [200, '#4a464a'], [1000, '#35333a'], [6000, '#26252a']];
-const ambient = d => d <= 0 ? 1 : Math.exp(-d * 0.015);   // sunlight left (≈1% at 300 m)
+let dayLight = 1;   // 1 by day; moonlight at night
+const ambient = d => (d <= 0 ? 1 : Math.exp(-d * 0.015)) * dayLight;   // sunlight left (≈1% at 300 m by day)
 
 // ---------- terrain: reef flat to the west (x < edge), a drop-off wall that falls to the trench floor ----------
 const edgeX = z => 5 * Math.sin(z * 0.011) + 6 * fbm(z * 0.02, 3.1);
@@ -807,6 +808,9 @@ function points(n, size, color, opts = {}) {
 const SNOW = 2500, snow = points(SNOW, 0.07, 0xe8f4ff, { opacity: 0.5 }), snowBase = new Float32Array(SNOW * 3).map(() => Math.random() * 40);
 const bubbles = points(200, 0.09, 0xffffff, { opacity: 0.8 }), bubbleList = [];
 const bits = points(200, 0.07, 0xffe0e0, { opacity: 0.9 }), bitList = [];
+const sparks = points(500, 0.09, 0xffffff, { colors: true, add: true }), sparkList = [];   // bioluminescent plankton stirred up at night
+const cocoons = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshPhysicalMaterial({ color: 0xdff0ff, transparent: true, opacity: 0.2, roughness: 0.05, clearcoat: 1, depthWrite: false }), 200);
+cocoons.frustumCulled = false; cocoons.count = 0; scene.add(cocoons);   // sleeping parrotfish wrap themselves in mucus
 const haloS = points(1500, 0.6, 0xffffff, { colors: true, add: true }), haloL = points(400, 2.6, 0xffffff, { colors: true, add: true });
 
 // ---------- diver: articulated model with neoprene, BCD, tank, regulator, hoses and flexing fins ----------
@@ -928,14 +932,15 @@ const diveOpts = { night: false, realistic: false };
 let diveStats = { start: 0, maxDepth: 0, warnings: [], extra: [] };
 
 function startDive(s) {
-  site = s; diveId = Date.now(); diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
+  site = s; diveId = Date.now(); dayLight = diveOpts.night ? 0.012 : 1;
+  surface.material.color.set(diveOpts.night ? 0x1c2a3c : 0xdff6ff); CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0, warnings: [], extra: [] };
   $('computer').hidden = !diveOpts.realistic;
   pool = species.filter(sp => !sp.host);
   hosts = species.filter(sp => sp.host);
   cells = new Map(); summoned = [];
   diver.p.set(edgeX(0) + 7, diveOpts.realistic ? -0.5 : -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;   // realistic dives start at the surface
   resetComputer();
-  $('site-name').textContent = `${s.name} · ${s.area}`;
+  $('site-name').textContent = `${s.name} · ${s.area}${diveOpts.night ? ' · 🌙 night' : ''}`;
   $('picker').hidden = true; $('land').hidden = true; $('hud').hidden = false; closeCard();
   updateTiles(true);
   if (!startDive.seen) { startDive.seen = 1; $('help').hidden = false; }
@@ -943,9 +948,20 @@ function startDive(s) {
 
 // ---------- creatures ----------
 const speedOf = sp => (SPEED[sp.type] ?? 0.5) * clamp(Math.sqrt(sp.size), 0.5, 3);
+// Night: some animals come out, day fish rest, and deep animals rise toward the surface (diel vertical migration).
+const NIGHT_MULT = { whitetip_reef: 2.5, tawny_nurse: 2, giant_moray: 1.5, green_moray: 1.5, lionfish_miles: 1.5, lionfish_volitans: 1.5, spanish_dancer: 2, cuttlefish: 1.3, day_octopus: 0.4, krait: 1.3 };
+const NIGHT_TYP = { lanternfish: [20, 300], pyrosome: [0, 150], firefly_squid: [0, 150], humboldt_squid: [0, 200], sixgill: [50, 500], megamouth: [10, 40], bigeye_thresher: [0, 150], swordfish: [0, 100], viperfish: [200, 800] };
+const SLEEPERS = new Set(['bumphead', 'stoplight_parrot']), NIGHT_HUNTERS = new Set(['giant_moray', 'green_moray']);
+const typOf = sp => (diveOpts.night && NIGHT_TYP[sp.id]) || sp.typ;
 function density(sp, d) {
   if (d < sp.depth[0] || d > sp.depth[1]) return 0;
-  const typ = sp.typ || sp.depth; return d >= typ[0] && d <= typ[1] ? 1 : 0.08;
+  const typ = typOf(sp) || sp.depth; return d >= typ[0] && d <= typ[1] ? 1 : 0.08;
+}
+function nightTraits(sp) {
+  if (NIGHT_HUNTERS.has(sp.id)) return { fixed: false, hunter: true };            // morays leave their holes to hunt
+  if (SLEEPERS.has(sp.id)) return { sleep: true };                                // parrotfish sleep in a mucus cocoon
+  if (sp.hab === 'reef' && sp.type === 'fish' && !sp.pred && !NIGHT_MULT[sp.id]) return { rest: true };   // day fish rest near the reef
+  return undefined;
 }
 function makeCreature(sp, p, extra) {
   const k = kindOf(sp);
@@ -975,7 +991,7 @@ function makeCell(i, j, k) {
   const reef = findSurface(r, x0, d0, z0) !== null;
   for (const sp of pool) {
     const dens = density(sp, mid); if (!dens) continue;
-    let exp = sp.ab * dens * (site.featured[sp.id] || 1) * (mid > 200 ? 3 : 1);
+    let exp = sp.ab * dens * (site.featured[sp.id] || 1) * (mid > 200 ? 3 : 1) * (diveOpts.night ? NIGHT_MULT[sp.id] || 1 : 1);
     if (sp.hab === 'pelagic') exp *= K_PEL; else if (!reef) continue; else exp *= CORAL.has(sp.type) ? K_CORAL : K_REEF;
     const n = Math.floor(exp) + (r() < exp % 1 ? 1 : 0);
     for (let m = 0; m < n; m++) {
@@ -984,8 +1000,8 @@ function makeCell(i, j, k) {
       else { s = findSurface(r, x0, d0, z0); if (!s) continue; p = s.p.clone(); if (sp.hab === 'reef') p.addScaledVector(s.n, 0.6 + r() * 4).add(_v.set(0, (r() - 0.5) * 2, (r() - 0.5) * 3)); }
       if (sp.hab !== 'benthic') { pushOut(p, 0.5); if (-p.y < sp.depth[0]) p.y = -Math.max(0.5, sp.depth[0]); }
       else if (s.n.x > 0) p.x -= 0.05;
-      const lead = makeCreature(sp, p);
-      if (s && sp.hab === 'benthic' && s.n.x > 0) { lead.yaw = 0; lead.q.setFromEuler(_e.set(0, 0, 0, 'YZX')); }
+      const lead = makeCreature(sp, p, diveOpts.night ? nightTraits(sp) : undefined);
+      if (s && sp.hab === 'benthic' && s.n.x > 0 && lead.fixed) { lead.yaw = 0; lead.q.setFromEuler(_e.set(0, 0, 0, 'YZX')); }
       list.push(lead);
       if (sp.type === 'anemone' && hosts.length) {
         const ok = hosts.filter(h => -p.y >= h.depth[0] && -p.y <= h.depth[1]); if (!ok.length) continue;
@@ -1026,8 +1042,9 @@ function stepCreature(c, dt, dSpeed) {
     if (sp.mood === 'hide') { const near = dist < 3 + dSpeed * 1.5; c.hide = lerp(c.hide, near ? 1 : 0, Math.min(1, dt * (near ? 6 : 0.5))); }
     c.ph += dt * c.kind.freq; return;
   }
-  const spd = speedOf(sp), up = c.kind.upright;
+  const spd = speedOf(sp) * (c.rest ? 0.35 : 1), up = c.kind.upright;
   let urgency = 1.5;
+  if (c.sleep) { c.v.multiplyScalar(0.9); c.ph += dt * 0.5; return; }
   _des.set(0, 0, 0);
   // reaction to the diver
   const mood = sp.mood || (['shark', 'whale', 'ray', 'turtle'].includes(sp.type) ? 'calm' : 'shy');
@@ -1042,7 +1059,7 @@ function stepCreature(c, dt, dSpeed) {
     }
   } else if (mood === 'calm' && dist < c.size * 0.7 + 2) c.flee = t + 0.6;
   // predators hunt
-  if (sp.pred && t > c.full && !c.leader) {
+  if ((sp.pred || c.hunter) && t > c.full && !c.leader) {
     if (!c.prey && t > c.next) {
       let best = null, bd = 18;
       for (const o of mobile) {
@@ -1050,7 +1067,7 @@ function stepCreature(c, dt, dSpeed) {
         if (!['fish', 'squid', 'crust', 'cuttle'].includes(o.sp.type) || o.size > c.size * 0.35) continue;
         const dd = o.p.distanceTo(c.p); if (dd < bd) { bd = dd; best = o; }
       }
-      if (best) { c.prey = best; c.chaseEnd = t + 8; } else c.next = t + 4 + Math.random() * 3;
+      if (best) { c.prey = best; c.chaseEnd = t + 8; } else c.next = t + (diveOpts.night ? 2 : 4) + Math.random() * 3;
     }
     if (c.prey) {
       const pr = c.prey;
@@ -1060,7 +1077,7 @@ function stepCreature(c, dt, dSpeed) {
         _des.copy(_v2).multiplyScalar(spd * 3.5 / Math.max(dd, 0.01)); urgency = 4;
         pr.flee = t + 1; pr.fleeFrom = c;
         if (dd < c.size * 0.35 + pr.size * 0.5 + 0.1) {
-          kill(pr); c.prey = null; c.full = t + 25 + Math.random() * 25;
+          kill(pr); c.prey = null; c.full = t + (diveOpts.night ? 12 : 25) + Math.random() * 25;
           for (let i = 0; i < 25; i++) bitList.push({ p: pr.p.clone(), v: new Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(1.5), age: 0 });
           if (c.p.distanceTo(diver.p) < 35 && t > lastCatchToast + 3) lastCatchToast = t, toast(`${sp.type === 'shark' ? '🦈' : '🐟'} ${cap(an(label(sp).toLowerCase()))} caught ${an(label(pr.sp).toLowerCase())}!`);
         }
@@ -1080,7 +1097,7 @@ function stepCreature(c, dt, dSpeed) {
       if (c.leader) c.leader = null;
       if (t > c.next || c.p.distanceTo(c.tgt) < 0.8) {
         const R = Math.random;
-        if (sp.hab === 'reef') c.tgt.copy(c.home).add(_v.set((R() - 0.5) * 12, (R() - 0.5) * 4, (R() - 0.5) * 12));
+        if (sp.hab === 'reef' || sp.hab === 'benthic') { const r = c.rest ? 3 : 12; c.tgt.copy(c.home).add(_v.set((R() - 0.5) * r, (R() - 0.5) * r / 3, (R() - 0.5) * r)); }
         else c.tgt.copy(c.p).add(_v.set((R() - 0.5) * 40, (R() - 0.5) * 8, (R() - 0.5) * 40));
         c.tgt.y = -clamp(-c.tgt.y, Math.max(sp.depth[0], 0.5), Math.min(sp.depth[1], FLOOR - 1));
         pushOut(c.tgt, 1 + c.size * 0.5); c.next = t + 4 + R() * 8;
@@ -1189,7 +1206,7 @@ function frame(now, manual) {
   diverModel.grp.position.copy(diver.p);
   diverModel.grp.rotation.set(0, diver.yaw, diver.pitch);
   // light & water
-  const camD = -camera.position.y, water = stops(WATER, camD);
+  const camD = -camera.position.y, water = diveOpts.night ? mix(stops(WATER, camD), '#00040a', 0.88) : stops(WATER, camD);
   scene.background.set(water); scene.fog.color.set(water); scene.fog.density = 0.02 + 0.016 * (1 - ambient(camD));
   hemi.color.set(mix('#ffffff', water, 0.3)); hemi.groundColor.set(mix(water, '#000000', 0.6)); hemi.intensity = 0.04 + 1.0 * amb; scene.environmentIntensity = 0.02 + 0.9 * amb;
   sun.color.set(mix('#fff2dc', '#6fcbe6', clamp(depth / 40, 0, 1))); sun.intensity = 2.6 * amb;
@@ -1198,7 +1215,7 @@ function frame(now, manual) {
   torch.intensity = torchK * 45; torch.position.copy(diver.p).addScaledVector(f, 0.8); torch.target.position.copy(diver.p).addScaledVector(f, 20);
   diverLamp.intensity = torchK * 6; diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position);
   surface.position.set(diver.p.x, 0, diver.p.z); surfTex.offset.set(t * 0.01, t * 0.006); surface.visible = camD < 150;
-  shafts.forEach(s => { s.visible = depth < 90; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
+  shafts.forEach(s => { s.visible = depth < 90 && !diveOpts.night; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
   shaftMat.opacity = 0.07 * clamp(1 - depth / 80, 0, 1);
   floor.visible = depth > FLOOR - 400; floor.position.set(Math.round(diver.p.x / 50) * 50, -FLOOR, Math.round(diver.p.z / 50) * 50);
 
@@ -1207,8 +1224,8 @@ function frame(now, manual) {
   const cam = camera.position;
   for (const c of live) if (c.p.distanceToSquared(cam) < 12000) c.kind.n++;
   for (const k of kinds.values()) { if (k.n > k.cap) { let cap = k.cap; while (cap < k.n) cap *= 2; grow(k, cap); } k.n = 0; }
-  let hs = 0, hl = 0; const hsP = haloS.geometry.attributes.position.array, hsC = haloS.geometry.attributes.color.array, hlP = haloL.geometry.attributes.position.array, hlC = haloL.geometry.attributes.color.array;
-  const glowK = clamp((depth - 60) / 250, 0, 1);
+  let hs = 0, hl = 0, nc = 0; const hsP = haloS.geometry.attributes.position.array, hsC = haloS.geometry.attributes.color.array, hlP = haloL.geometry.attributes.position.array, hlC = haloL.geometry.attributes.color.array;
+  const glowK = diveOpts.night ? 1 : clamp((depth - 60) / 250, 0, 1);
   for (const c of live) {
     const d2 = c.p.distanceToSquared(cam); if (d2 >= 12000) continue;
     const k = c.kind, i = k.n++;
@@ -1221,6 +1238,7 @@ function frame(now, manual) {
       _pos.copy(c.p); if (c.hide) _pos.y -= c.size * c.hide * 0.1;
       _mat.compose(_pos, c.q, _scl); k.mesh.setMatrixAt(i, _mat);
     } k.mesh.instanceColor.setXYZ(i, c.tint.r, c.tint.g, c.tint.b); k.phase.array[i] = c.ph; k.list[i] = c;
+    if (c.sleep && d2 < 3600 && nc < 200) { _mat.compose(c.p, c.q, _scl.set(c.size * 0.62, c.size * 0.34, c.size * 0.32)); cocoons.setMatrixAt(nc++, _mat); }
     if (c.sp.glow && glowK > 0 && d2 < 3600) {
       const col = _c.set(c.sp.glow.c).multiplyScalar(glowK * (0.6 + 0.4 * Math.sin(t * 2.5 + c.ph)) * Math.min(1, d2 / 9));   // halos fade up close so they don't blind the camera
       const s = c.sp.glow.s, n = s === 'beads' ? 7 : 1;
@@ -1236,6 +1254,7 @@ function frame(now, manual) {
     if (k.n) { k.mesh.instanceMatrix.needsUpdate = true; k.mesh.instanceColor.needsUpdate = true; k.phase.needsUpdate = true; }
     if (k.sp.glow) k.mat.emissiveIntensity = glowK * (k.sp.glow.s === 'ring' ? 0.6 + 0.8 * Math.max(0, Math.sin(t * 4)) : 1.2);
   }
+  cocoons.count = nc; cocoons.instanceMatrix.needsUpdate = true;
   haloS.geometry.setDrawRange(0, hs); haloL.geometry.setDrawRange(0, hl);
   haloS.geometry.attributes.position.needsUpdate = haloS.geometry.attributes.color.needsUpdate = true;
   haloL.geometry.attributes.position.needsUpdate = haloL.geometry.attributes.color.needsUpdate = true;
@@ -1257,6 +1276,15 @@ function frame(now, manual) {
   for (let i = bitList.length - 1; i >= 0; i--) if (bitList[i].age > 1.5) bitList.splice(i, 1);
   for (const b of bitList) if (tn < 200) { tp[tn * 3] = b.p.x; tp[tn * 3 + 1] = b.p.y; tp[tn * 3 + 2] = b.p.z; tn++; }
   bits.geometry.setDrawRange(0, tn); bits.geometry.attributes.position.needsUpdate = true;
+  if (diveOpts.night || depth > 200) {   // plankton flash blue-green wherever the water is disturbed
+    const dsp = diver.v.length(); let n = dsp * dt * 45;
+    while (n-- > Math.random()) sparkList.push({ p: diver.p.clone().addScaledVector(f, -0.9 - Math.random() * 0.6).add(_v.set((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.8)), age: 0, life: 0.6 + Math.random() * 0.9 });
+    for (const c of mobile) if (c.flee > t && Math.random() < dt * 6 && c.p.distanceToSquared(diver.p) < 100) sparkList.push({ p: c.p.clone(), age: 0, life: 0.8 });
+  }
+  const kp = sparks.geometry.attributes.position.array, kc = sparks.geometry.attributes.color.array; let kn = 0;
+  for (let i = sparkList.length - 1; i >= 0; i--) if ((sparkList[i].age += dt) > sparkList[i].life) sparkList.splice(i, 1);
+  for (const k of sparkList) if (kn < 500) { const a = 1 - k.age / k.life, fl = a * (0.6 + 0.4 * Math.sin(k.age * 30)); kp.set([k.p.x, k.p.y, k.p.z], kn * 3); kc.set([0.35 * fl, 1 * fl, 0.95 * fl], kn * 3); kn++; }
+  sparks.geometry.setDrawRange(0, kn); sparks.geometry.attributes.position.needsUpdate = sparks.geometry.attributes.color.needsUpdate = true;
 
   CAUST.uTime.value = t;
   renderer.render(scene, camera);
