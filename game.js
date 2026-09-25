@@ -972,7 +972,7 @@ CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth:
   resetComputer();
   $('site-name').textContent = `${s.name} · ${s.area}${diveOpts.night ? ' · 🌙 night' : ''}`;
   $('picker').hidden = true; $('land').hidden = true; $('hud').hidden = false; closeCard();
-  updateTiles(true); updateTarget();
+  updateTiles(true); updateTarget(); applyTouch();
   if (!startDive.seen) { startDive.seen = 1; $('help').hidden = false; }
 }
 
@@ -1167,11 +1167,11 @@ const currentWord = v => v < 0.25 ? 'mild' : v < 0.55 ? 'moderate' : 'strong';
 // ---------- diver ----------
 function stepDiver(dt) {
   const f = forward(), r = _v2.set(Math.sin(diver.yaw), 0, Math.cos(diver.yaw));
-  const fw = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), st = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  const fw = clamp((keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) - touch.y, -1, 1), st = clamp((keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + touch.x, -1, 1);
   const lx = (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0), ly = (keys.ArrowUp ? 1 : 0) - (keys.ArrowDown ? 1 : 0);
   diver.yaw -= lx * dt * 1.8; diver.pitch = clamp(diver.pitch + ly * dt * 1.3, -1.45, 1.45);   // arrow keys look around
-  const vt = (keys.Space ? 1 : 0) - (keys.KeyC || keys.ControlLeft ? 1 : 0);
-  const turbo = keys.ShiftLeft || keys.ShiftRight, depth = -diver.p.y;
+  const vt = (keys.Space || touch.up ? 1 : 0) - (keys.KeyC || keys.ControlLeft || touch.down ? 1 : 0);
+  const turbo = keys.ShiftLeft || keys.ShiftRight || touch.fast, depth = -diver.p.y;
   const max = diveOpts.realistic ? (turbo ? 2.2 : 1.1) : turbo ? 12 + depth * 0.05 : 1.8;   // explorer turbo scales with depth so the trenches are reachable
   _des.set(0, 0, 0).addScaledVector(f, fw).addScaledVector(r, st).add(_v.set(0, vt, 0));
   if (_des.lengthSq() > 0) _des.setLength(max);
@@ -1192,7 +1192,7 @@ let comp = null;
 function resetComputer() { comp = { air: 200, load: 0, safety: 0, fastAscent: 0, warned: {}, outOfAir: false, lastD: -diver.p.y }; }
 function warnOnce(key, msg) { if (!comp.warned[key]) { comp.warned[key] = true; toast(`⚠️ ${msg}`); diveStats.warnings.push(msg); } }
 function stepComputer(dt) {
-  const d = -diver.p.y, amb = 1 + d / 10, moving = diver.v.length(), turbo = keys.ShiftLeft || keys.ShiftRight;
+  const d = -diver.p.y, amb = 1 + d / 10, moving = diver.v.length(), turbo = keys.ShiftLeft || keys.ShiftRight || touch.fast;
   comp.air = Math.max(0, comp.air - (20 / 60) * amb * (turbo ? 1.8 : moving > 0.3 ? 1.25 : 1) * dt / 11.1);
   const ndl = ndlAt(d);
   if (ndl < Infinity) comp.load += dt / 60 / ndl; else comp.load = Math.max(comp.load > 1 ? 1 : 0, comp.load - dt / 60 / 45);   // slow off-gassing in the shallows
@@ -1515,7 +1515,7 @@ let photos = [], camMode = false, zoom = 1, diveId = 0, lastShot = -9, framing =
 photoDB.all().then(list => { photos = list.sort((a, b) => a.time - b.time); updateShotCount(); if (!$('picker').hidden) renderSitePicker(); });
 const strobe = new THREE.PointLight(0xffffff, 0, 14, 1.2); scene.add(strobe);
 function setCamMode(on) {
-  camMode = on; $('viewfinder').hidden = !on; $('crosshair').hidden = on; $('aim').hidden = true; $('controls').hidden = on; $('gauge').hidden = on;
+  camMode = on; document.body.classList.toggle('cam', on); $('viewfinder').hidden = !on; $('crosshair').hidden = on; $('aim').hidden = true; $('controls').hidden = on; $('gauge').hidden = on;
   if (!on) { zoom = 1; camera.fov = 70; camera.updateProjectionMatrix(); }
   updateZoom();
 }
@@ -1691,7 +1691,7 @@ function endDive() {
   $('sum-warn').hidden = !diveStats.warnings.length; $('sum-warn').textContent = diveStats.warnings.join(' · ');
   if (diveOpts.realistic && diveStats.maxDepth > 18 && comp.safety >= 180 && !diveStats.warnings.length) completeGoal(GOALS.find(g => g.id === 'book'));
   setCamMode(false); closeCard(); $('guide').hidden = true; $('photos').hidden = true; document.exitPointerLock?.();
-  site = null; $('hud').hidden = true; $('summary').hidden = false;
+  site = null; $('hud').hidden = true; $('summary').hidden = false; applyTouch();
 }
 $('change-site').onclick = endDive;
 $('sum-land').onclick = () => { $('summary').hidden = true; openLand(); };
@@ -1891,7 +1891,7 @@ for (const [id, key, ev] of [['set-hide', 'hideNames', 'checked'], ['set-sound',
 $('set-reset').onclick = () => { if (!confirm('Reset your logbook, badges and goals? Photos are kept but become unidentified again.')) return; progress.discovered = {}; progress.badges = {}; progress.goals = {}; progress.targets = {}; saveProgress(); for (const p of photos) { p.researched = false; delete p.identified; photoDB.put(p); } toast('Progress reset'); };
 function applySettings() { applyGraphics(); applyAudio(); applyTouch(); renderSitePicker(); }
 // filled in by later features
-function applyGraphics() { renderer.shadowMap.needsUpdate = true; } function applyAudio() { audio.apply(); } function applyTouch() {}
+function applyGraphics() { renderer.shadowMap.needsUpdate = true; } function applyAudio() { audio.apply(); } 
 // ---------- goals: photo challenges and site targets ----------
 const GOALS = [
   { id: 'manta', icon: '🪽', name: 'Manta portrait', desc: 'A ★★★ photo of a reef manta ray', test: p => p.subject?.id === 'reef_manta' && p.stars === 3 },
@@ -1969,6 +1969,37 @@ addEventListener('mousemove', e => {
 $('help-close').onclick = () => { $('help').hidden = true; };
 $('open-help').onclick = () => { $('help').hidden = false; };
 
+// ---------- touch controls ----------
+const touch = { x: 0, y: 0, up: false, down: false, fast: false };
+function applyTouch() {
+  const on = settings.touch === 'on' || (settings.touch === 'auto' && (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0));
+  document.body.classList.toggle('touch', on); $('touch').hidden = !on || !site;
+}
+{
+  const joy = $('joy'), knob = $('joy-knob'); let jid = null;
+  const move = e => { const r = joy.getBoundingClientRect(), R = r.width / 2; let x = (e.clientX - r.left - R) / R, y = (e.clientY - r.top - R) / R; const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; } touch.x = x; touch.y = y; knob.style.transform = `translate(${x * R * 0.6}px, ${y * R * 0.6}px)`; };
+  joy.addEventListener('pointerdown', e => { jid = e.pointerId; joy.setPointerCapture(jid); move(e); e.preventDefault(); });
+  joy.addEventListener('pointermove', e => { if (e.pointerId === jid) move(e); });
+  const end = e => { if (e.pointerId !== jid) return; jid = null; touch.x = touch.y = 0; knob.style.transform = ''; };
+  joy.addEventListener('pointerup', end); joy.addEventListener('pointercancel', end);
+  for (const b of $('tbtns').querySelectorAll('[data-k]')) {
+    const k = b.dataset.k, set = v => e => { touch[k] = v; b.classList.toggle('on', v); e.preventDefault(); };
+    b.addEventListener('pointerdown', set(true)); for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(ev, set(false));
+  }
+  $('t-cam').onclick = () => setCamMode(!camMode); $('t-shoot').onclick = () => shoot();
+  $('t-zin').onclick = () => { zoom = clamp(zoom * 1.25, 1, 4); updateZoom(); }; $('t-zout').onclick = () => { zoom = clamp(zoom / 1.25, 1, 4); updateZoom(); };
+  // drag anywhere on the view to look; a quick tap inspects (or shoots with the camera up)
+  const pts = new Map();
+  canvas.addEventListener('pointerdown', e => { if (e.pointerType !== 'touch') return; e.preventDefault(); pts.set(e.pointerId, { x: e.clientX, y: e.clientY, moved: 0 }); });
+  canvas.addEventListener('pointermove', e => { const p = pts.get(e.pointerId); if (!p) return; const dx = e.clientX - p.x, dy = e.clientY - p.y; p.moved += Math.abs(dx) + Math.abs(dy); p.x = e.clientX; p.y = e.clientY; look(dx * 1.6, dy * 1.6); });
+  canvas.addEventListener('pointerup', e => {
+    const p = pts.get(e.pointerId); pts.delete(e.pointerId); if (!p || p.moved > 10 || !site || uiOpen()) return;
+    if (camMode) { shoot(); return; }
+    mouseNDC = { x: e.clientX / innerWidth * 2 - 1, y: -(e.clientY / innerHeight) * 2 + 1 }; const c = pick(); mouseNDC = null; if (c) openCard(c);
+  });
+  canvas.addEventListener('pointercancel', e => pts.delete(e.pointerId));
+}
+
 // ---------- site picker ----------
 function renderSitePicker() {
   $('sites').innerHTML = '';
@@ -1990,7 +2021,7 @@ function renderSitePicker() {
 function showPicker() { renderSitePicker(); $('picker').hidden = false; $('land').hidden = true; }
 $('opt-time').onclick = e => { const v = e.target.closest('button')?.dataset.v; if (v) { diveOpts.night = v === 'night'; renderSitePicker(); } };
 $('opt-mode').onclick = e => { const v = e.target.closest('button')?.dataset.v; if (v) { diveOpts.realistic = v === 'realistic'; renderSitePicker(); } };
-renderSitePicker();
+renderSitePicker(); applyTouch();
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
 window.scuba = { step: (n, dt = 1 / 30) => { for (let i = 0; i < n; i++) frame(performance.now(), dt); }, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
