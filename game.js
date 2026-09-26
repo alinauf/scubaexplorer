@@ -1210,9 +1210,25 @@ const surface = new THREE.Mesh(new THREE.PlaneGeometry(700, 700, 1, 1), new THRE
     }` }));
 surface.rotation.x = -Math.PI / 2; scene.add(surface);
 const shaftTex = (() => { const cv = makeCanvas(4, 128), g = cv.getContext('2d'), gr = g.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, '#fff'); gr.addColorStop(1, '#000'); g.fillStyle = gr; g.fillRect(0, 0, 4, 128); return new THREE.CanvasTexture(cv); })();
-const shaftMat = new THREE.MeshBasicMaterial({ color: 0xfff8d8, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, alphaMap: shaftTex, side: THREE.DoubleSide, fog: false });
-const shaftGeo = new THREE.CylinderGeometry(1.2, 4, 70, 12, 1, true); shaftGeo.translate(0, -35, 0);
-const shafts = Array.from({ length: 14 }, (_, i) => { const m = new THREE.Mesh(shaftGeo, shaftMat); m.userData.o = [h2(i, 1) * 90, h2(i, 2) * 90]; m.rotation.z = 0.18; m.rotation.x = 0.05; scene.add(m); return m; });
+// Sun shafts: soft-edged (faded where you see a shaft's side at a glancing angle), brightest just under the surface, shimmering as the
+// waves above focus and scatter the light, and faded out close to you and in the distance so they never pop or fill the view
+const shaftU = { uTime: { value: 0 }, uK: { value: 0 } };
+const shaftMat = new THREE.ShaderMaterial({ uniforms: shaftU, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  vertexShader: 'varying vec3 vW; varying vec3 vN; varying float vY; void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vN = normalize(mat3(modelMatrix) * normal); vY = uv.y; gl_Position = projectionMatrix * viewMatrix * w; }',
+  fragmentShader: `uniform float uTime, uK; varying vec3 vW; varying vec3 vN; varying float vY;
+    void main() {
+      vec3 v = normalize(cameraPosition - vW);
+      float edge = pow(abs(dot(normalize(vN), v)), 2.5);
+      float fall = pow(vY, 1.6) * (1.0 - smoothstep(0.9, 1.0, vY));   // melt into the surface instead of ending in a hard rim
+      float shimmer = 0.45 + 0.55 * (0.5 + 0.5 * sin(vW.x * 0.6 + vW.z * 0.45 + uTime * 1.1)) * (0.5 + 0.5 * sin(vW.x * 0.27 - vW.z * 0.52 - uTime * 0.7 + vY * 3.0));
+      float hd = length(cameraPosition.xz - vW.xz), d = length(cameraPosition - vW);
+      float a = uK * edge * fall * shimmer * smoothstep(1.5, 9.0, d) * (1.0 - smoothstep(22.0, 42.0, hd));
+      gl_FragColor = vec4(vec3(1.0, 0.96, 0.84) * a, 1.0);
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }` });
+const shaftGeo = new THREE.CylinderGeometry(0.8, 2.6, 60, 16, 1, true); shaftGeo.translate(0, -30, 0);
+const shafts = Array.from({ length: 22 }, (_, i) => { const m = new THREE.Mesh(shaftGeo, shaftMat), k = 0.55 + h2(i, 3) * 0.8; m.userData.o = [h2(i, 1) * 90, h2(i, 2) * 90]; m.scale.set(k, 0.7 + h2(i, 4) * 0.5, k); m.rotation.z = 0.18; m.rotation.x = 0.05; m.frustumCulled = false; scene.add(m); return m; });
 const dotTex = (() => { const cv = makeCanvas(64, 64), g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.3, 'rgba(255,255,255,0.6)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(cv); })();
 function points(n, size, color, opts = {}) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
@@ -1859,8 +1875,9 @@ function frame(now, manual) {
   diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position); if (VIEW.on) diverModel.beam.material.opacity = 0;
   surface.position.set(diver.p.x, 0, diver.p.z); surface.visible = camD < 150;
   surfU.uTime.value = t; surfU.uNight.value = diveOpts.night ? 1 : 0; surfU.uFogD.value = scene.fog.density; surfU.uWater.value.set(water);
-  shafts.forEach(s => { s.visible = depth < 90 && !diveOpts.night; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
-  shaftMat.opacity = 0.07 * clamp(1 - depth / 80, 0, 1) * (1 - shelterK);
+  const wrap = (o, c) => c + ((o - c) % 90 + 135) % 90 - 45;   // each shaft wraps around you on its own, out where it has already faded
+  shafts.forEach(s => { s.visible = depth < 90 && !diveOpts.night; s.position.set(wrap(s.userData.o[0], diver.p.x), 0, wrap(s.userData.o[1], diver.p.z)); });
+  shaftU.uTime.value = t; shaftU.uK.value = 0.16 * clamp(1 - depth / 70, 0, 1) * (1 - shelterK);
   floor.visible = depth > FLOOR - 400; floor.position.set(Math.round(diver.p.x / 50) * 50, -FLOOR, Math.round(diver.p.z / 50) * 50);
 
   // write instances (two passes: count, grow buffers, then fill)
