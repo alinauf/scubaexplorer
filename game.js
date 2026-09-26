@@ -2004,7 +2004,11 @@ function frame(now, manual) {
   CAUST.uTime.value = t;
   if (!skipRender) renderFrame();
 
-  if ((audioT -= dt) < 0) { audioT = 0.5; let wn = false, sn = false; for (const c of mobile) if (c.sp.type === 'whale' && !c.sp.f?.dolphin && !c.sp.f?.sealion && !c.sp.f?.dugong) { const dd = c.p.distanceTo(diver.p); if (dd < 250) { wn = true; if (c.sp.id === 'sperm' && dd < 120) sn = true; } } audio.update(depth, t, wn, sn); audio.hum((G.hum || 0) * (0.6 + Math.min(1, diver.v.length() / 3) * 0.6)); }
+  if ((audioT -= dt) < 0) {   // humpbacks sing (louder the closer they are); sperm whales click
+    audioT = 0.5; let wk = 0, sn = false;
+    for (const c of mobile) { if (c.sp.f?.humpback) wk = Math.max(wk, clamp(1 - c.p.distanceTo(diver.p) / 250, 0, 1)); else if (c.sp.id === 'sperm' && c.p.distanceTo(diver.p) < 120) sn = true; }
+    audio.update(depth, t, wk, sn); audio.hum((G.hum || 0) * (0.6 + Math.min(1, diver.v.length() / 3) * 0.6));
+  }
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
   if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); }
   if (camMode && (camT -= dt) < 0) {
@@ -2274,31 +2278,40 @@ const audio = (() => {
     hiss(at, fast ? 0.9 : 1.4, 380, 0.7, 0.35);
     for (let i = 0; i < 14; i++) { const t0 = at + 0.15 + Math.random() * (fast ? 0.9 : 1.4), o = ctx.createOscillator(), g = ctx.createGain(), f = 250 + Math.random() * 500; o.frequency.setValueAtTime(f, t0); o.frequency.exponentialRampToValueAtTime(f * 2.4, t0 + 0.05); env(g, t0, 0.06, 0.005, 0.02, 0.04); o.connect(g); g.connect(master); g.connect(verb); o.start(t0); o.stop(t0 + 0.1); }
   }
-  function song(near) {   // a humpback-style phrase: slow gliding moans with vibrato, drenched in reverb
-    const at = ctx.currentTime, units = 3 + (Math.random() * 3 | 0);
-    for (let u = 0; u < units; u++) {
-      const t0 = at + u * 1.8, o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain(), base = 90 + Math.random() * 260;
-      o.type = 'sawtooth'; o.frequency.setValueAtTime(base, t0); o.frequency.exponentialRampToValueAtTime(base * (0.6 + Math.random() * 0.9), t0 + 1.5);
-      lfo.frequency.value = 4 + Math.random() * 3; lg.gain.value = base * 0.03; lfo.connect(lg).connect(o.frequency);
-      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 700;
-      env(g, t0, near ? 0.12 : 0.04, 0.4, 0.8, 0.5); o.connect(f).connect(g); g.connect(verb); if (near) g.connect(master);
-      o.start(t0); lfo.start(t0); o.stop(t0 + 1.9); lfo.stop(t0 + 1.9);
+  let voice = null;   // a soft, rounded tone (a few gentle harmonics) instead of a buzzy sawtooth
+  function song(k) {   // a humpback phrase: long gliding moans, a rising "whoop", a low groan — soft, slow and mostly reverb, louder the closer the whale (k 0..1)
+    voice ||= ctx.createPeriodicWave(new Float32Array([0, 0, 0, 0, 0, 0]), new Float32Array([0, 1, 0.32, 0.12, 0.05, 0.02]));
+    let t0 = ctx.currentTime + 0.1;
+    for (let u = 0, units = 2 + (Math.random() * 3 | 0); u < units; u++) {
+      const kind = Math.random(), whoop = kind < 0.25, groan = kind > 0.8, dur = whoop ? 0.9 : groan ? 2.4 : 1.8 + Math.random() * 1.2;
+      const base = whoop ? 140 + Math.random() * 60 : groan ? 70 + Math.random() * 40 : 120 + Math.random() * 200, end = whoop ? base * 2.6 : base * (0.75 + Math.random() * 0.5);
+      const o = ctx.createOscillator(), lfo = ctx.createOscillator(), lg = ctx.createGain(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+      o.setPeriodicWave(voice); o.frequency.setValueAtTime(base, t0); o.frequency.exponentialRampToValueAtTime(end, t0 + dur * (whoop ? 0.8 : 0.9));
+      lfo.frequency.value = 0.6 + Math.random() * 0.8; lg.gain.value = base * 0.012; lfo.connect(lg).connect(o.frequency);   // a slow, slight waver
+      f.type = 'lowpass'; f.frequency.value = whoop ? 1100 : 750; f.Q.value = 0.3;
+      env(g, t0, 0.012 + 0.045 * k, dur * 0.3, dur * 0.35, dur * 0.35);
+      o.connect(f).connect(g); g.connect(verb); if (k > 0.4) { const dry = ctx.createGain(); dry.gain.value = 0.35; g.connect(dry).connect(master); }
+      o.start(t0); lfo.start(t0); o.stop(t0 + dur + 0.1); lfo.stop(t0 + dur + 0.1);
+      t0 += dur + 0.4 + Math.random() * 1.2;
     }
   }
-  function clicks() { const at = ctx.currentTime; for (let i = 0; i < 8; i++) { const t0 = at + i * (0.4 + Math.random() * 0.3); hiss(t0, 0.02, 2500, 1, 0.3); } }
+  function clicks() {   // a sperm whale's echolocation: a steady train of dull knocks
+    const at = ctx.currentTime, gap = 0.5 + Math.random() * 0.4;
+    for (let i = 0; i < 8; i++) hiss(at + i * gap * (0.95 + Math.random() * 0.1), 0.012, 1300, 2.5, 0.12, verb), hiss(at + i * gap, 0.012, 1300, 2.5, 0.06);
+  }
   let humGain = null;
   function hum(level) {   // thrusters and life support: a low electric hum
     if (!ctx) return;
     if (!humGain) { humGain = ctx.createGain(); humGain.gain.value = 0; const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 220; for (const hz of [48, 48.7, 96.3]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz; o.connect(f); o.start(); } f.connect(humGain).connect(master); }
     humGain.gain.setTargetAtTime(settings.sound ? level : 0, ctx.currentTime, 0.4);
   }
-  function update(depth, now, whaleNear, spermNear) {
+  function update(depth, now, song_k, spermNear) {
     if (!ctx || !settings.sound) return;
     const k = clamp(depth / 200, 0, 1);
     muffle.frequency.setTargetAtTime(lerp(2400, 700, k), ctx.currentTime, 0.5);   // deeper = more muffled
     ambGain.gain.setTargetAtTime(lerp(0.22, 0.07, k), ctx.currentTime, 0.5); ambFilter.frequency.setTargetAtTime(lerp(650, 250, k), ctx.currentTime, 0.5);
-    if (now > nextSong && (whaleNear || (depth > 250 && Math.random() < 0.5))) { song(whaleNear); nextSong = now + 20 + Math.random() * 30; }
-    else if (now > nextSong) nextSong = now + 15;
+    if (now > nextSong && song_k > 0) { song(song_k); nextSong = now + 30 + Math.random() * 40; }   // only when a humpback is actually within earshot
+    else if (now > nextSong) nextSong = now + 10;
     if (spermNear && now > nextClick) { clicks(); nextClick = now + 4 + Math.random() * 4; }
   }
   function shutter() {
