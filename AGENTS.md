@@ -27,7 +27,7 @@ No build step, no package.json, no dependencies to install. Three files make up 
 
 - Plain modern JavaScript, no frameworks, no modules. `game.js` must stay loadable as a classic script (three.js is pulled in with a dynamic `import()`).
 - Dense, compact style: short helper names (`$`, `lerp`, `clamp`, `smooth`, `mix`, `rng`, `hash`), arrow functions, one-line objects. Match the surrounding density rather than expanding code.
-- Everything is procedural. Creature bodies, textures, terrain and all sound (Web Audio synthesis) are generated in code. There are no image or audio asset files, so don't add any.
+- Everything is procedural. Creature bodies, textures, terrain and all sound (Web Audio synthesis) are generated in code. There are no image or audio asset files, so don't add any. The one exception is the real photo on species cards: `speciesPhoto()` fetches it from Wikipedia at runtime (by scientific name, then common name) and credits it, and it stays hidden until the player has identified the species.
 - Keep randomness deterministic where it already is (seeded `rng`, `hash`, `h2`, `vnoise`) so reefs and creatures look the same on every visit.
 - Persistence is `localStorage` only, through the `store` helper, under the keys `scuba-settings` and `scuba-progress`. Add new saved fields with defaults in the `Object.assign` calls so old saves keep working.
 - Touch and phone support matter. New controls need a touch equivalent (see the touch controls section and `#touch` in `index.html`), and new overlays must be closable with `Esc` and a visible close button.

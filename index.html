@@ -71,6 +71,10 @@
   .card dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0 0 12px; font-size: 14px; }
   .card dt { color: #7fb6d0; } .card dd { margin: 0; }
   .card p { margin: 0 0 12px; }
+  .photo { margin: 12px 0; border-radius: 10px; overflow: hidden; background: rgba(127,224,255,.06); min-height: 60px; }
+  .photo img { display: block; width: 100%; max-height: 230px; object-fit: cover; opacity: 0; transition: opacity .3s; }
+  .photo img.ready { opacity: 1; }
+  .photo figcaption { font-size: 11px; color: #8fb8cc; padding: 5px 8px; } .photo figcaption a { color: #9fe0ff; }
 
   #help { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0, 8, 16, 0.55); padding: 16px; z-index: 5; }
   #help .card { position: relative; width: min(560px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; background: rgba(4, 24, 42, 0.97); }
@@ -341,6 +345,7 @@
   <h2 id="card-name"></h2>
   <span id="card-sci" class="sci"></span>
   <div class="chips"><span id="card-status" class="chip"></span><span id="card-native" class="tag"></span></div>
+  <figure class="photo" id="card-photo" hidden><img alt=""><figcaption></figcaption></figure>
   <dl>
     <dt>Depth</dt><dd id="card-depth"></dd>
     <dt>Size</dt><dd id="card-size"></dd>
@@ -368,6 +373,7 @@
         <h2 id="g-name"></h2>
         <span id="g-sci" class="sci"></span>
         <div class="chips"><span id="g-status" class="chip"></span><span id="g-native" class="tag"></span></div>
+        <figure class="photo" id="g-photo" hidden><img alt=""><figcaption></figcaption></figure>
         <button id="g-summon" class="btn primary"></button>
         <dl>
           <dt>Depth</dt><dd id="g-depth"></dd>
@@ -479,6 +485,7 @@
   <h2 data-f="name"></h2>
   <span data-f="sci" class="sci"></span>
   <div class="chips"><span data-f="status" class="chip"></span><span data-f="native" class="tag"></span></div>
+  <figure class="photo" data-f="photo" hidden><img alt=""><figcaption></figcaption></figure>
   <dl><dt>Depth</dt><dd data-f="depth"></dd><dt>Size</dt><dd data-f="size"></dd><dt>Lives in</dt><dd data-f="where"></dd><dt>Behaviour</dt><dd data-f="behave"></dd></dl>
   <p data-f="fact"></p>
 </template>
