@@ -173,14 +173,19 @@ function limb(from, dir, len, r0, r1, patch, seg = 5) { // tapered cylinder from
 }
 function eyes(P, x, y, z, r, white = true) {
   for (const s of [-1, 1]) {
-    if (white) P.push(part(sphere(12), { patch: 8, m: M(x, y, s * z * 0.9, 0, 0, 0, r, r, r * 0.55) }));        // iris, set flush into the head
-    P.push(part(sphere(10), { patch: 1, m: M(x + r * 0.1, y, s * (z * (white ? 0.9 : 1) + r * (white ? 0.3 : 0.1)), 0, 0, 0, r * (white ? 0.6 : 1), r * (white ? 0.6 : 1), r * (white ? 0.35 : 1)) }));
+    if (white) {   // a dark socket rim, a coloured iris set flush into the head and a black pupil (both glossy, see makeRM)
+      P.push(part(sphere(12), { patch: 1, m: M(x, y, s * z * 0.86, 0, 0, 0, r * 1.12, r * 1.12, r * 0.5) }));
+      P.push(part(sphere(14), { patch: 8, m: M(x, y, s * z * 0.9, 0, 0, 0, r, r, r * 0.55) }));
+      P.push(part(sphere(10), { patch: 1, m: M(x + r * 0.05, y, s * (z * 0.9 + r * 0.3), 0, 0, 0, r * 0.5, r * 0.5, r * 0.3) }));
+    } else P.push(part(sphere(10), { patch: 1, m: M(x + r * 0.1, y, s * (z + r * 0.1), 0, 0, 0, r) }));
   }
 }
-function pectorals(P, x, y, z, len, patch, down = 0.35) {
-  const g = () => shape([0.04, 0, -0.05, 0, -0.1 * len, 0.16 * len]);
-  P.push(part(g(), { patch, m: M(x, y, z, Math.PI / 2 + down, 0, 0) }));
-  P.push(part(g(), { patch, m: M(x, y, -z, -(Math.PI / 2 + down), 0, 0) }));
+// flutter: the fin's aW runs 1 at the base → ~2 at the tip, so the fish shader can scull it (bony fish hover and steer with their pectorals)
+function pectorals(P, x, y, z, len, patch, down = 0.35, flutter = false) {
+  const L = len, g = () => flutter ? shape([0.025, 0, 0.005, 0.05 * L, -0.1 * L, 0.1 * L, -0.24 * L, 0.09 * L, -0.3 * L, 0.05 * L, -0.24 * L, 0.012 * L, -0.02, 0]) : shape([0.04, 0, -0.05, 0, -0.1 * L, 0.16 * L]);
+  const wFn = flutter ? (px, py, pz) => 1 + clamp(Math.hypot(px - x, py - y, Math.abs(pz) - z) / (0.3 * L), 0, 0.99) : null;
+  P.push(part(g(), { patch, wFn, m: M(x, y, z, Math.PI / 2 + down, 0, 0) }));
+  P.push(part(g(), { patch, wFn, m: M(x, y, -z, -(Math.PI / 2 + down), 0, 0) }));
 }
 
 // ---------- body builders (unit length along x, nose at +x) ----------
@@ -193,10 +198,15 @@ function tailShape(kind, Ht) {
 const BUILD = {
   fish(sp) {
     const f = sp.f || {}, H = f.h || 0.4, P = [], rat = !!f.rattail, x1 = rat ? -0.5 : -0.3;
-    const wr = f.w || (H > 0.55 ? 0.32 : H < 0.22 ? 0.75 : 0.5);
-    const prof = t => t < 0.33 ? Math.pow(Math.sin(t / 0.33 * Math.PI / 2), 0.85) : 1 - (1 - (rat ? 0.03 : 0.15)) * Math.pow((t - 0.33) / 0.67, rat ? 0.9 : 1.5);
+    const wr = f.w || (H > 0.55 ? 0.3 : H < 0.22 ? 0.72 : 0.46);
+    // separate back and belly outlines: the forehead climbs steeply from a low snout to the dorsal origin, the belly is fuller and flatter,
+    // and the body narrows to a slim caudal peduncle before flaring slightly into the tail
+    const tm = H > 0.55 ? 0.42 : 0.38, ped = rat ? 0.03 : f.box ? 0.3 : 0.14, snout = f.box ? 2.6 : f.snout ?? (H > 0.55 ? 1.8 : 2.2);
+    const rise = (t, m, e) => { const u = clamp(t / m, 0, 1); return Math.pow(1 - Math.pow(1 - u, snout), e); };
+    const fall = t => { const v = clamp((t - tm) / (0.93 - tm), 0, 1); return 1 - (1 - ped) * Math.pow(v, rat ? 0.9 : 1.3) + (rat ? 0 : 0.06 * smooth(0.9, 1, t)); };
     const hump = t => f.hump ? f.hump * 0.1 * H * Math.exp(-(((t - 0.1) / 0.1) ** 2)) : 0;
-    const fh = t => H / 2 * prof(t) + hump(t) / 2, fy = t => hump(t) / 2, fw = t => Math.max(0.003, H / 2 * prof(t) * wr * (f.box ? 1.6 : 1));
+    const upper = t => H / 2 * (t < tm ? rise(t, tm, 0.7) : fall(t)) * 1.06 + hump(t), lower = t => H / 2 * (t < tm ? rise(t, tm, 1.0) : fall(t)) * 0.94;
+    const fh = t => (upper(t) + lower(t)) / 2, fy = t => (upper(t) - lower(t)) / 2, fw = t => Math.max(0.003, fh(t) * wr * (f.box ? 1.6 : 1) * (1 + 0.25 * (1 - smooth(0, 0.3, t))));
     const tOf = x => clamp((0.5 - x) / (0.5 - x1), 0, 1), top = x => fy(tOf(x)) + fh(tOf(x)), bot = x => fy(tOf(x)) - fh(tOf(x));
     P.push(part(loft(32, 22, t => 0.5 - t * (0.5 - x1), fh, fw, fy)));
     if (!f.lobed && !f.tripod) for (const s of [-1, 1]) P.push(part(shape([0.03, 0, -0.1, 0, -0.08, -Math.max(0.05, H * 0.28)]), { patch: 2, m: M(0.1, bot(0.1) * 0.85, s * fw(tOf(0.1)) * 0.35, s * 0.35, 0, 0) }));
@@ -222,7 +232,7 @@ const BUILD = {
       else P.push(contourFin(0.14, -0.04, H * 0.55, false, 0.35), contourFin(-0.12, -0.24, H * 0.3, false, 0.4)); // streamlined: two dorsals
     }
     if (!rat && !['bat', 'streamer', 'spiky'].includes(d)) P.push(contourFin(H >= 0.33 ? 0.02 : -0.1, -0.26, H * (H > 0.6 ? 0.26 : H >= 0.33 ? 0.22 : 0.3), true, 0.55));
-    if (d !== 'spiky') pectorals(P, 0.2, bot(0.2) * 0.35, fw(tOf(0.2)) * 0.9, Math.max(0.5, H * 1.4), 2, 0.9);
+    if (d !== 'spiky') pectorals(P, 0.2, lerp(bot(0.2), top(0.2), 0.3), fw(tOf(0.2)) * 0.95, Math.max(0.5, H * 1.4), 2, 1.2, true);   // fanned back along the flank
     const ex = rat ? 0.4 : 0.36, et = tOf(ex), er = Math.max(0.013, H * 0.075) * (f.eyeBig ? 1.6 : 1);
     if (f.dome) for (const s of [-1, 1]) P.push(part(new THREE.CylinderGeometry(0.018, 0.018, 0.06, 8), { patch: 5, m: M(0.36, top(0.36), s * 0.018) }));
     else eyes(P, ex, fy(et) + fh(et) * 0.3, fw(et) * 0.85, er);
@@ -270,14 +280,19 @@ const BUILD = {
     for (const s of [-1, 1]) P.push(part(sphere(6), { patch: 1, m: M(xn - 0.05, 0.03, s * 0.07, 0, 0, 0, 0.012) }));
     return { P, mode: 3, amp: f.manta ? 0.35 : f.eagle ? 0.4 : 0.08 };
   },
-  turtle(sp) {
-    const P = [];
-    P.push(part(new THREE.SphereGeometry(1, 20, 14), { m: M(0, 0.03, 0, 0, 0, 0, 0.42, 0.14, 0.32) }));
-    P.push(part(sphere(10), { patch: 2, m: M(0.47, 0.02, 0, 0, 0, 0, 0.11, 0.08, 0.08) }));
-    eyes(P, 0.53, 0.04, 0.05, 0.015, false);
+  turtle(sp) {   // heart-shaped domed carapace over a flat plastron, a scaly head with a beak, long swept-back front flippers
+    const P = [], hawk = !!sp.f?.hawk, x0 = 0.38, x1 = -0.44;
+    const wd = t => 0.34 * Math.pow(Math.sin(Math.PI * clamp(Math.pow(t, 0.85), 0, 1)), 0.55), ht = t => 0.12 * Math.pow(Math.sin(Math.PI * t), 0.6), hb = t => 0.035 * Math.pow(Math.sin(Math.PI * t), 0.4);
+    P.push(part(loft(24, 26, t => x0 - t * (x0 - x1), t => (ht(t) + hb(t)) / 2, t => Math.max(0.004, wd(t)), t => (ht(t) - hb(t)) / 2)));
+    P.push(part(new THREE.CylinderGeometry(0.045, 0.06, 0.12, 10), { patch: 2, m: M(0.41, 0, 0, 0, 0, Math.PI / 2 - 0.12) }));           // neck
+    P.push(part(sphere(14), { patch: 2, m: M(0.5, 0.012, 0, 0, 0, -0.1, hawk ? 0.1 : 0.085, 0.052, 0.06) }));                          // head
+    P.push(part(new THREE.ConeGeometry(0.025, hawk ? 0.07 : 0.045, 8), { patch: 1, m: M(hawk ? 0.61 : 0.595, -0.008, 0, 0, 0, -Math.PI / 2 - 0.35, 1, 1, 0.8) }));   // beak
+    eyes(P, 0.54, 0.03, 0.05, 0.013, false);
+    const front = () => shape([0.05, 0, 0.03, 0.08, -0.04, 0.24, -0.15, 0.4, -0.2, 0.45, -0.17, 0.36, -0.09, 0.18, -0.05, 0]);
+    const rear = () => shape([0.03, 0, 0.0, 0.08, -0.07, 0.12, -0.12, 0.08, -0.08, 0]);
     for (const s of [-1, 1]) {
-      P.push(part(sphere(10), { patch: 2, w: 1, m: M(0.2, -0.02, s * 0.36, 0, s * 0.5, 0, 0.1, 0.015, 0.22) }));
-      P.push(part(sphere(8), { patch: 2, w: 2, m: M(-0.33, -0.02, s * 0.2, 0, -s * 0.4, 0, 0.09, 0.012, 0.1) }));
+      P.push(part(front(), { patch: 2, w: 1, m: M(0.22, -0.01, s * 0.26, s * Math.PI / 2, 0, 0) }));
+      P.push(part(rear(), { patch: 2, w: 2, m: M(-0.34, -0.005, s * 0.12, s * Math.PI / 2, 0, 0) }));
     }
     return { P, mode: 7, amp: 0.9 };
   },
@@ -599,10 +614,20 @@ function makeTex(sp) {
     if (f.eagle) for (let i = 0; i < 220; i++) { const y = R() * 128; if (back(y)) dot(R() * W, y, 1.7, c2); }
     if (f.sting) for (let i = 0; i < 120; i++) { const y = R() * 128; if (back(y)) dot(R() * W, y, 2.4, c2); }
   }
-  if (sp.type === 'turtle') {
-    g.fillStyle = c1; g.fillRect(0, 0, 248, 64); g.fillStyle = mix(sp.c[2], '#ffffff', 0.2); g.fillRect(0, 64, 248, 64);
-    g.strokeStyle = c0; g.lineWidth = 2; for (let x = 0; x < 248; x += 30) for (let y = 4; y < 60; y += 20) { g.beginPath(); for (let k = 0; k < 7; k++) { const a = k / 6 * Math.PI * 2; g.lineTo(x + 15 + Math.cos(a) * 13, y + 8 + Math.sin(a) * 9); } g.stroke(); }
-    if (f.hawk) for (let i = 0; i < 80; i++) dot(R() * 248, R() * 60, 3, 'rgba(240,200,120,0.5)');
+  if (sp.type === 'turtle') {   // carapace (loft: rows 0/128 = spine, 64 = belly): a spine row of 5 vertebral scutes, 4 costals each side, a rim of marginals, pale plastron
+    g.fillStyle = mix(c1, c0, 0.4); g.fillRect(0, 0, 248, 128);
+    for (let i = 0; i < 260; i++) { const x = R() * 248, y = R() * 128; g.strokeStyle = `rgba(${R() < 0.5 ? '40,26,10' : '250,220,160'},${0.12 + R() * 0.2})`; g.lineWidth = 1 + R() * 2; g.beginPath(); g.moveTo(x, y); g.lineTo(x + (R() - 0.5) * 10, y + (R() - 0.5) * 16); g.stroke(); }   // radiating streaks
+    if (f.hawk) for (let i = 0; i < 90; i++) dot(R() * 248, R() * 128, 2 + R() * 3, 'rgba(240,200,120,0.45)');
+    const pl = g.createLinearGradient(0, 38, 0, 90); pl.addColorStop(0, c1); pl.addColorStop(0.18, mix(sp.c[2], c0, 0.2)); pl.addColorStop(0.3, sp.c[2]); pl.addColorStop(0.7, sp.c[2]); pl.addColorStop(0.82, mix(sp.c[2], c0, 0.2)); pl.addColorStop(1, c1);
+    g.fillStyle = pl; g.fillRect(0, 38, 248, 52);
+    g.strokeStyle = mix(c0, '#000000', 0.2); g.lineWidth = 1.6;
+    both(s => {
+      const row = r => 64 + s * r;
+      for (let i = 0; i < 5; i++) { g.strokeRect(20 + i * 42, s > 0 ? row(64) - 14 : row(64), 42, 14); }                                // vertebrals along the spine
+      for (let i = 0; i < 4; i++) { g.beginPath(); g.moveTo(30 + i * 50, row(52)); g.lineTo(30 + i * 50, row(30)); g.lineTo(80 + i * 50, row(30)); g.stroke(); }   // costals
+      g.beginPath(); g.moveTo(6, row(30)); g.lineTo(242, row(30)); g.stroke();
+      for (let x = 6; x < 242; x += 16) { g.beginPath(); g.moveTo(x, row(30)); g.lineTo(x, row(24)); g.stroke(); }                          // marginals at the rim
+    });
   }
   if (sp.type === 'nautilus') { g.fillStyle = c0; g.fillRect(0, 0, 248, 128); g.strokeStyle = c1; g.lineWidth = 7; for (let x = 0; x < 260; x += 22) { g.beginPath(); g.moveTo(x, 0); g.quadraticCurveTo(x + 14, 36, x + 4, 70); g.stroke(); } }
   if (['octopus', 'cuttle', 'seahorse', 'crust'].includes(sp.type)) for (let i = 0; i < 90; i++) dot(R() * W, R() * 128, 2 + R() * 3, `rgba(0,0,0,${0.08 + R() * 0.12})`);
@@ -616,6 +641,19 @@ function makeTex(sp) {
   if (['table', 'mushroom', 'sponge', 'xeno', 'glass'].includes(sp.type)) { g.strokeStyle = c1; g.globalAlpha = sp.type === 'glass' ? 1 : 0.35; g.lineWidth = 1; for (let x = 0; x < W; x += 8) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 128); g.stroke(); } if (sp.type !== 'sponge') for (let y = 0; y < 128; y += 8) { g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); } g.globalAlpha = 1; }
   if (sp.type === 'fan') { g.strokeStyle = c0; g.lineWidth = 2.2; for (let i = 0; i < 26; i++) { g.beginPath(); g.moveTo(128, 128); g.lineTo(i / 25 * 240, 0); g.stroke(); } g.strokeStyle = c1; g.lineWidth = 1.6; for (let r = 14; r < 150; r += 13) { g.beginPath(); g.arc(128, 128, r, Math.PI, Math.PI * 2); g.stroke(); } }
   if (sp.type === 'clam') { g.fillStyle = c0; g.fillRect(0, 0, 248, 128); for (let i = 0; i < 70; i++) dot(R() * W, R() * 128, 3, c1); }
+  if (sp.type === 'fish' || sp.type === 'shark') {   // countershading (a darker back), then fine mottling so no flank is a flat colour
+    const cs = g.createLinearGradient(0, 0, 0, 128); cs.addColorStop(0, 'rgba(0,0,0,0.26)'); cs.addColorStop(0.2, 'rgba(0,0,0,0)'); cs.addColorStop(0.8, 'rgba(0,0,0,0)'); cs.addColorStop(1, 'rgba(0,0,0,0.26)');
+    g.fillStyle = cs; g.fillRect(0, 0, W, 128);
+    for (let i = 0; i < 1400; i++) dot(R() * W, R() * 128, 0.4 + R() * 1.3, R() < 0.5 ? `rgba(0,0,0,${0.03 + R() * 0.06})` : `rgba(255,255,255,${0.03 + R() * 0.05})`);
+  }
+  if (sp.type === 'fish' && !f.rattail && !f.blob && !f.box) {   // overlapping scales: each one's free edge faces the tail, dark rim, pale sheen
+    const sz = sp.size > 1 ? 3.2 : 4.2;
+    for (let y = 0, row = 0; y < 130; y += sz * 0.75, row++) for (let x = 44 + (row % 2) * sz * 0.5; x < W - 4; x += sz) {
+      g.strokeStyle = 'rgba(0,0,0,0.13)'; g.lineWidth = 0.55; g.beginPath(); g.arc(x, y, sz * 0.62, -1.3, 1.3); g.stroke();
+      g.strokeStyle = 'rgba(255,255,255,0.07)'; g.beginPath(); g.arc(x - 0.6, y, sz * 0.45, -1.1, 1.1); g.stroke();
+    }
+  }
+  if (sp.type === 'fish' && !f.blob) { g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 1.2; for (const y of [33, 95]) { g.beginPath(); g.moveTo(0, y); g.lineTo(7, y + (y < 64 ? 1 : -1)); g.stroke(); } }   // mouth
   if (sp.type === 'fish' && f.pattern !== 'bands') {   // gill cover and lateral line
     g.strokeStyle = 'rgba(0,0,0,0.16)'; g.lineWidth = 1; for (const [a, b] of [[16, 56], [72, 112]]) { g.beginPath(); g.moveTo(50, a); g.quadraticCurveTo(62, (a + b) / 2, 50, b); g.stroke(); }
     g.strokeStyle = 'rgba(255,255,255,0.22)'; g.lineWidth = 0.8; for (const y of [30, 98]) { g.beginPath(); g.moveTo(62, y); g.quadraticCurveTo(140, y + (y < 64 ? -6 : 6), 236, 64 + (y - 64) * 0.4); g.stroke(); }
@@ -629,9 +667,28 @@ function makeTex(sp) {
   [[256, fin], [288, tailc]].forEach(([y0, col]) => {
     const gr = g.createLinearGradient(0, y0, 0, y0 + 32); gr.addColorStop(0, mix(col, '#000000', 0.1)); gr.addColorStop(0.75, col); gr.addColorStop(1, mix(col, '#ffffff', 0.35));
     g.fillStyle = gr; g.fillRect(0, y0, 512, 32);
-    if (sp.type === 'fish') { g.strokeStyle = mix(col, '#000000', 0.35); g.globalAlpha = 0.55; g.lineWidth = 1.5; for (let x = 4; x < 512; x += 11) { g.beginPath(); g.moveTo(x, y0); g.lineTo(x + (x - 256) * 0.02, y0 + 32); g.stroke(); } g.globalAlpha = 1; }
+    if (sp.type === 'turtle') { g.strokeStyle = mix(col, '#f4e2b0', 0.55); g.lineWidth = 1.3; for (let y = y0; y < y0 + 32; y += 7) for (let x = (y / 7 % 2) * 6; x < 512; x += 12) { g.beginPath(); g.ellipse(x, y + 3, 5, 3.2, 0, 0, 7); g.stroke(); } }   // pale-edged flipper scales
+    if (sp.type === 'fish') {   // thin membrane between bony rays: alpha stores how much water shows through (see the fish shader)
+      g.globalCompositeOperation = 'destination-out'; const ga = g.createLinearGradient(0, y0, 0, y0 + 32); ga.addColorStop(0, 'rgba(0,0,0,0.1)'); ga.addColorStop(0.55, 'rgba(0,0,0,0.42)'); ga.addColorStop(1, 'rgba(0,0,0,0.6)');
+      g.fillStyle = ga; g.fillRect(0, y0, 512, 32); g.globalCompositeOperation = 'source-over';
+      g.strokeStyle = mix(col, '#000000', 0.3); g.globalAlpha = 0.7; g.lineWidth = 1.4; for (let x = 4; x < 512; x += 11) { g.beginPath(); g.moveTo(x, y0); g.lineTo(x + (x - 256) * 0.02, y0 + 30); g.stroke(); } g.globalAlpha = 1;
+    }
   });
   const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; return tex;
+}
+// roughness (green) & metalness (blue) in the same layout: glossy eyes, guanine-silvered flanks and bellies on bony fish, wet skin on mammals
+const RM_TYPES = { fish: [0.42, 0.1], shark: [0.5, 0.04], ray: [0.45, 0.04], whale: [0.28, 0.04], eel: [0.26, 0.08], turtle: [0.55, 0] };
+function makeRM(sp) {
+  const cv = makeCanvas(512, 320), g = cv.getContext('2d'), R = rng(hash(sp.id) + 5), [r0, m0] = RM_TYPES[sp.type], shiny = SHINY.has(sp.id), fish = sp.type === 'fish';
+  const rm = (r, m) => `rgb(0,${clamp(r, 0, 1) * 255 | 0},${clamp(m, 0, 1) * 255 | 0})`;
+  for (let y = 0; y < 256; y++) { const k = 1 - Math.abs(y - 128) / 128; g.fillStyle = rm(shiny ? 0.22 : r0 - k * 0.08, shiny ? 0.55 + 0.25 * k : fish ? m0 + 0.3 * k * k : m0); g.fillRect(0, y, 496, 1); }
+  if (fish) for (let i = 0; i < 2500; i++) { g.fillStyle = rm(r0 - R() * 0.15, (shiny ? 0.6 : 0.15) + R() * 0.3); g.fillRect(R() * 496, R() * 256, 2, 2); }   // scales catch the light unevenly
+  g.fillStyle = rm(fish ? 0.55 : r0, 0); g.fillRect(0, 256, 512, 64);
+  g.fillStyle = rm(r0, m0); g.fillRect(496, 0, 16, 256);
+  g.fillStyle = rm(0.3, 0); g.fillRect(496, 0, 16, 16);        // white (teeth)
+  g.fillStyle = rm(0.04, 0); g.fillRect(496, 16, 16, 16);      // black: pupils are wet and glassy
+  g.fillStyle = rm(0.12, 0.45); g.fillRect(496, 128, 16, 16);  // iris: a metallic ring
+  return new THREE.CanvasTexture(cv);
 }
 function makeGlowTex(sp) {
   const cv = makeCanvas(512, 320), g = cv.getContext('2d'), s = sp.glow.s;
@@ -660,8 +717,9 @@ const SHINY = new Set(['silver_sprat', 'giant_trevally', 'bluefin_trevally', 'bi
 // ---------- per-species instanced meshes, animated in the vertex shader ----------
 const MODE_GLSL = [
   '',
-  // 1 fish: tail beat
-  'float k = clamp(0.25 - position.x, 0.0, 0.8); transformed.z += sin(aPhase - position.x * 5.0) * uAmp * k * k * 4.0 + sin(aPhase) * uAmp * 0.06;',
+  // 1 fish: a travelling wave that grows toward the tail, a slight counter-sway of the head, pectoral fins sculling (aW 1 → 2 from base to tip)
+  'float k = clamp(0.25 - position.x, 0.0, 0.8); transformed.z += sin(aPhase - position.x * 5.0) * uAmp * k * k * 4.0 + sin(aPhase) * uAmp * 0.06 - sin(aPhase + 0.7) * uAmp * 0.5 * max(0.0, position.x - 0.2);' +
+  'if (aW > 0.5 && aW < 2.0) { float s = aW - 1.0, fl = aPhase * 0.55 + position.z * 3.0; transformed.x += s * sin(fl) * 0.045; transformed.y += s * cos(fl) * 0.025 * sign(position.z); }',
   // 2 whale: vertical fluke beat
   'float k = clamp(0.1 - position.x, 0.0, 0.9); transformed.y += sin(aPhase - position.x * 4.0) * uAmp * k * k * 4.0;',
   // 3 ray: wing flap
@@ -704,18 +762,20 @@ const kinds = new Map();
 function kindOf(sp) {
   let k = kinds.get(sp.id); if (k) return k;
   const b = BUILD[sp.type](sp), geo = b.geo || merge(b.P), mode = b.mode || 0;
-  const map = makeTex(sp), coral = CORAL.has(sp.type), shiny = SHINY.has(sp.id);
-  const mat = new THREE.MeshStandardMaterial({ map, roughness: shiny ? 0.28 : coral ? 0.8 : sp.type === 'whale' ? 0.35 : 0.45, metalness: shiny ? 0.55 : 0.05, side: THREE.DoubleSide, transparent: !!b.transparent, opacity: b.transparent || 1, depthWrite: !b.transparent, alphaTest: b.alphaTest || 0,
+  const map = makeTex(sp), coral = CORAL.has(sp.type), shiny = SHINY.has(sp.id), rm = RM_TYPES[sp.type] && !b.transparent && !sp.f?.garden ? makeRM(sp) : null, fins = sp.type === 'fish';
+  const mat = new THREE.MeshStandardMaterial({ map, roughness: rm ? 1 : shiny ? 0.28 : coral ? 0.8 : sp.type === 'whale' ? 0.35 : 0.45, metalness: rm ? 1 : shiny ? 0.55 : 0.05, roughnessMap: rm, metalnessMap: rm, side: THREE.DoubleSide, transparent: !!b.transparent, opacity: b.transparent || 1, depthWrite: !b.transparent, alphaTest: b.alphaTest || 0,
     bumpMap: sp.type === 'fish' ? bumpFor('scales') : ['shark', 'ray'].includes(sp.type) ? bumpFor('skin') : coral ? map : null, bumpScale: coral ? 1.5 : 0.8 });
   if (sp.glow) { mat.emissive = new Color(sp.glow.c); mat.emissiveMap = makeGlowTex(sp); mat.emissiveIntensity = 0; }
   const amp = b.amp || 0;
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uAmp = { value: amp };
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aPhase;\nattribute float aW;\nuniform float uAmp;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\n{ ${MODE_GLSL[mode]} }`);
+    sh.uniforms.uAmpK = { value: amp };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aPhase;\nattribute float aAmp;\nattribute float aW;\nuniform float uAmpK;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\n{ float uAmp = uAmpK * aAmp; ${MODE_GLSL[mode]} }`);   // aAmp: how hard this individual is swimming
+    if (fins) sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\nfloat finA = diffuseColor.a; diffuseColor.a = 1.0;')
+      .replace('#include <fog_fragment>', '#include <fog_fragment>\n#ifdef USE_FOG\ngl_FragColor.rgb = mix(fogColor, gl_FragColor.rgb, 0.3 + 0.7 * finA);   // thin fin membranes let the water show through\n#endif');
     caustify(sh);
   };
-  mat.customProgramCacheKey = () => 'anim' + mode;
+  mat.customProgramCacheKey = () => 'anim' + mode + (fins ? 'f' : '');
   let freq = FREQ[mode];
   if (mode === 1) freq = clamp(5 / Math.sqrt(sp.size), 2, 14);
   if (mode === 3) freq = sp.f?.sting ? 3 : 1.3;
@@ -725,7 +785,8 @@ function kindOf(sp) {
 function grow(k, cap) {
   if (k.mesh) { scene.remove(k.mesh); k.mesh.dispose(); }
   k.cap = cap; k.phase = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1); k.phase.setUsage(THREE.DynamicDrawUsage);
-  k.geo.setAttribute('aPhase', k.phase);
+  k.amp = new THREE.InstancedBufferAttribute(new Float32Array(cap).fill(1), 1); k.amp.setUsage(THREE.DynamicDrawUsage);
+  k.geo.setAttribute('aPhase', k.phase); k.geo.setAttribute('aAmp', k.amp);
   k.mesh = new THREE.InstancedMesh(k.geo, k.mat, cap); k.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   k.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3); k.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
   k.mesh.castShadow = true; k.mesh.receiveShadow = CORAL.has(k.sp.type);
@@ -1185,7 +1246,7 @@ function stepCreature(c, dt, dSpeed) {
   }
   const spd = speedOf(sp) * (c.rest ? 0.35 : 1) * (c.ballUntil > t && !c.leader ? 0.2 : 1), up = c.kind.upright;
   let urgency = 1.5;
-  if (c.sleep) { c.v.multiplyScalar(0.9); c.ph += dt * 0.5; return; }
+  if (c.sleep) { c.v.multiplyScalar(0.9); c.ph += dt * 0.5; c.swim = 0.2; return; }
   _des.set(0, 0, 0);
   // reaction to the diver
   const mood = sp.mood || (['shark', 'whale', 'ray', 'turtle'].includes(sp.type) ? 'calm' : 'shy');
@@ -1259,9 +1320,11 @@ function stepCreature(c, dt, dSpeed) {
   c.p.addScaledVector(c.v, dt).addScaledVector(currentAt(c.p), dt);
   const d = -c.p.y; if (d < sp.depth[0] - 2) c.p.y = -(sp.depth[0] - 2); if (d > sp.depth[1] + 2) c.p.y = -(sp.depth[1] + 2);
   pushOut(c.p, 0.3 + c.size * 0.3);
-  const sv = c.v.length();
+  const sv = c.v.length(), yaw0 = c.yaw;
   if (sv > 0.03) { c.yaw = angLerp(c.yaw, Math.atan2(-c.v.z, c.v.x), Math.min(1, dt * 4)); c.pitch = lerp(c.pitch, up ? 0 : clamp(Math.atan2(c.v.y, Math.hypot(c.v.x, c.v.z)), -0.6, 0.6), Math.min(1, dt * 3)); }
-  c.q.setFromEuler(_e.set(0, c.yaw, c.pitch, 'YZX'));
+  c.roll = lerp(c.roll || 0, up ? 0 : clamp(-(c.yaw - yaw0) / Math.max(dt, 1e-3) * 0.2, -0.45, 0.45), Math.min(1, dt * 3));   // bank into turns
+  c.swim = lerp(c.swim ?? 1, clamp(0.3 + sv / Math.max(0.05, spd) * 0.7, 0.3, 1.9), Math.min(1, dt * 2));             // beat harder when swimming fast, barely fin when hovering
+  c.q.setFromEuler(_e.set(c.roll, c.yaw, c.pitch, 'YZX'));
   c.ph += dt * c.kind.freq * (0.5 + Math.min(3, sv / Math.max(0.05, spd)) * 0.6);
 }
 
@@ -1368,7 +1431,7 @@ function frame(now, manual) {
       _scl.set(c.size * puff, c.size * puff * (1 - c.hide * 0.85), c.size * puff * (1 + c.puff * 0.5));
       _pos.copy(c.p); if (c.hide) _pos.y -= c.size * c.hide * 0.1;
       _mat.compose(_pos, c.q, _scl); k.mesh.setMatrixAt(i, _mat);
-    } k.mesh.instanceColor.setXYZ(i, c.tint.r, c.tint.g, c.tint.b); k.phase.array[i] = c.ph; k.list[i] = c;
+    } k.mesh.instanceColor.setXYZ(i, c.tint.r, c.tint.g, c.tint.b); k.phase.array[i] = c.ph; k.amp.array[i] = c.swim ?? 1; k.list[i] = c;
     if (c.sleep && d2 < 3600 && nc < 200) { _mat.compose(c.p, c.q, _scl.set(c.size * 0.62, c.size * 0.34, c.size * 0.32)); cocoons.setMatrixAt(nc++, _mat); }
     if (c.sp.glow && glowK > 0 && d2 < 3600) {
       const col = _c.set(c.sp.glow.c).multiplyScalar(glowK * (0.6 + 0.4 * Math.sin(t * 2.5 + c.ph)) * Math.min(1, d2 / 9));   // halos fade up close so they don't blind the camera
@@ -1382,7 +1445,7 @@ function frame(now, manual) {
   }
   for (const k of kinds.values()) {
     k.mesh.count = k.n; k.mesh.visible = k.n > 0;
-    if (k.n) { k.mesh.instanceMatrix.needsUpdate = true; k.mesh.instanceColor.needsUpdate = true; k.phase.needsUpdate = true; }
+    if (k.n) { k.mesh.instanceMatrix.needsUpdate = true; k.mesh.instanceColor.needsUpdate = true; k.phase.needsUpdate = true; k.amp.needsUpdate = true; }
     if (k.sp.glow) k.mat.emissiveIntensity = glowK * (k.sp.glow.s === 'ring' ? 0.6 + 0.8 * Math.max(0, Math.sin(t * 4)) : 1.2);
   }
   cocoons.count = nc; cocoons.instanceMatrix.needsUpdate = true;
