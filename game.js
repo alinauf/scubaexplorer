@@ -595,6 +595,10 @@ function makeTex(sp) {
   if (p === 'scales') { g.strokeStyle = c2; g.globalAlpha = 0.4; for (let x = -128; x < W; x += 10) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 128, 128); g.moveTo(x + 128, 0); g.lineTo(x, 128); g.stroke(); } g.globalAlpha = 1; }
   if (p === 'bigspots') { for (let i = 0; i < 16; i++) dot(40 + R() * 150, 64 + (R() - 0.5) * 50, 7, c1); g.fillStyle = c2; g.fillRect(60, 0, 50, 14); g.fillRect(60, 114, 50, 14); }
   if (p === 'lines') { g.strokeStyle = '#d8f0c0'; for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(0, 10 + i * 20); g.quadraticCurveTo(25, 20 + i * 20, 50, 8 + i * 20); g.stroke(); } }
+  if (p === 'streak') {   // cleaner wrasse: a black stripe from snout to tail that widens toward the back, blue on the rear half
+    const bl = g.createLinearGradient(0, 0, W, 0); bl.addColorStop(0, 'rgba(40,110,230,0)'); bl.addColorStop(1, 'rgba(40,110,230,0.7)'); g.fillStyle = bl; g.fillRect(0, 0, W, 128);
+    g.fillStyle = c1; both(s => { g.beginPath(); g.moveTo(0, 64 + s * 32 - 1.5); g.lineTo(W, 64 + s * 32 - 9); g.lineTo(W, 64 + s * 32 + 9); g.lineTo(0, 64 + s * 32 + 1.5); g.fill(); });
+  }
   if (p === 'swirl') { g.lineWidth = 3; for (let i = 0; i < 14; i++) { g.strokeStyle = i % 2 ? c1 : c2; g.beginPath(); for (let x = 0; x < W; x += 6) g.lineTo(x, i * 9 + Math.sin(x * 0.08 + i) * 5); g.stroke(); } }
   // body-type specific looks
   if (sp.type === 'shark') {
@@ -779,7 +783,7 @@ function kindOf(sp) {
   let freq = FREQ[mode];
   if (mode === 1) freq = clamp(5 / Math.sqrt(sp.size), 2, 14);
   if (mode === 3) freq = sp.f?.sting ? 3 : 1.3;
-  k = { sp, geo, mat, mode, freq, upright: UPRIGHT.has(sp.type) || !!sp.f?.garden, cap: 0, mesh: null, n: 0, list: [] };
+  k = { sp, geo, mat, mode, freq, upright: UPRIGHT.has(sp.type) || !!sp.f?.garden, ceph: ['octopus', 'cuttle', 'squid'].includes(sp.type), cap: 0, mesh: null, n: 0, list: [] };
   grow(k, 16); kinds.set(sp.id, k); return k;
 }
 function grow(k, cap) {
@@ -899,6 +903,7 @@ const SNOW = 2500, snow = points(SNOW, 0.07, 0xe8f4ff, { opacity: 0.5 }), snowBa
 const bubbles = points(200, 0.09, 0xffffff, { opacity: 0.8 }), bubbleList = [];
 const bits = points(200, 0.07, 0xffe0e0, { opacity: 0.9 }), bitList = [];
 const sparks = points(500, 0.09, 0xffffff, { colors: true, add: true }), sparkList = [];   // bioluminescent plankton stirred up at night
+const ink = points(400, 0.45, 0x120d0a, { opacity: 0.55 }), inkList = [];   // a startled octopus's ink cloud
 const cocoons = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshPhysicalMaterial({ color: 0xdff0ff, transparent: true, opacity: 0.2, roughness: 0.05, clearcoat: 1, depthWrite: false }), 200);
 cocoons.frustumCulled = false; cocoons.count = 0; scene.add(cocoons);   // sleeping parrotfish wrap themselves in mucus
 const haloS = points(1500, 0.6, 0xffffff, { colors: true, add: true }), haloL = points(400, 2.6, 0xffffff, { colors: true, add: true });
@@ -1117,6 +1122,8 @@ const diver = { p: new Vector3(), v: new Vector3(), yaw: Math.PI, pitch: -0.15, 
 const mobile = [];
 let debugCam = null, site = null, pool = [], hosts = [], cells = new Map(), summoned = [], live = [], t = 0, firstPerson = false;
 const keys = {};
+// how much of a disturbance you are: swimming fast, bubbles and camera flashes make it rise, hovering lets it settle (0 calm → 1 noisy)
+const presence = { base: 0, spike: 0, noise: 0 };
 const forward = (out = new Vector3()) => out.set(Math.cos(diver.pitch) * Math.cos(diver.yaw), Math.sin(diver.pitch), -Math.cos(diver.pitch) * Math.sin(diver.yaw));
 
 // ---------- settings & progress (saved in this browser) ----------
@@ -1134,7 +1141,7 @@ let diveStats = { start: 0, maxDepth: 0 };
 function startDive(s) {
   site = s; diveId = Date.now(); audio.init(); { const [v, deg] = s.current || [0, 0], a = deg * Math.PI / 180; curBase.set(Math.sin(a) * v, 0, -Math.cos(a) * v); } dayLight = diveOpts.night ? 0.012 : 1;
 CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth: 0 };
-  pool = species.filter(sp => !sp.host);
+  pool = species.filter(sp => !sp.host && !sp.lair);   // lair species only live at cleaning stations, in caves and on wrecks
   hosts = species.filter(sp => sp.host);
   cells = new Map(); summoned = [];
   diver.p.set(edgeX(0) + 7, -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;
@@ -1150,6 +1157,9 @@ const speedOf = sp => (SPEED[sp.type] ?? 0.5) * clamp(Math.sqrt(sp.size), 0.5, 3
 const NIGHT_MULT = { whitetip_reef: 2.5, tawny_nurse: 2, giant_moray: 1.5, green_moray: 1.5, lionfish_miles: 1.5, lionfish_volitans: 1.5, spanish_dancer: 2, cuttlefish: 1.3, day_octopus: 0.4, krait: 1.3 };
 const NIGHT_TYP = { lanternfish: [20, 300], pyrosome: [0, 150], firefly_squid: [0, 150], humboldt_squid: [0, 200], sixgill: [50, 500], megamouth: [10, 40], bigeye_thresher: [0, 150], swordfish: [0, 100], viperfish: [200, 800] };
 const SLEEPERS = new Set(['bumphead', 'stoplight_parrot']), NIGHT_HUNTERS = new Set(['giant_moray', 'green_moray']);
+// air breathers: seconds between breaths (sped up for the game) — turtles, sea snakes, dugongs and dolphins must come up to the surface
+const AIR = { turtle: [70, 160], krait: [40, 90], olive_seasnake: [40, 90], dugong: [30, 60], spinner: [20, 45], bottlenose: [20, 45] };
+const airOf = sp => AIR[sp.id] || AIR[sp.type];
 const typOf = sp => (diveOpts.night && NIGHT_TYP[sp.id]) || sp.typ;
 function density(sp, d) {
   if (d < sp.depth[0] || d > sp.depth[1]) return 0;
@@ -1164,7 +1174,8 @@ function nightTraits(sp) {
 function makeCreature(sp, p, extra) {
   const k = kindOf(sp);
   const c = { sp, kind: k, p: p.clone(), v: new Vector3(), q: new Quaternion(), yaw: Math.random() * 6.283, pitch: 0, size: sp.size * (0.85 + Math.random() * 0.3), ph: Math.random() * 10,
-    fixed: sp.hab === 'benthic', home: p.clone(), tgt: p.clone(), next: sp.pred ? t + 5 + Math.random() * 40 : 0, flee: 0, full: 0, puff: 0, hide: 0, prey: null, leader: null, off: null, ...extra };
+    fixed: sp.hab === 'benthic', home: p.clone(), tgt: p.clone(), next: sp.pred ? t + 5 + Math.random() * 40 : 0, flee: 0, full: 0, puff: 0, hide: 0, prey: null, leader: null, off: null, trust: 0, flash: 0, ...extra };
+  if (airOf(sp) && !c.leader) c.air = airOf(sp)[1] * (0.15 + Math.random() * 0.85);   // seconds of breath left
   c.q.setFromEuler(_e.set(0, c.yaw, 0, 'YZX'));
   if (!c.tint) {   // individuals vary: colour morphs for corals & sponges, subtle shading for animals
     const R = Math.random, v = CORAL.has(sp.type) ? 0.78 + R() * 0.35 : 0.9 + R() * 0.15;
@@ -1216,6 +1227,13 @@ function makeCell(i, j, k) {
       }
     }
   }
+  if (reef && mid < 35 && !diveOpts.night && r() < 0.22) {   // a cleaning station: a few cleaner wrasse holding court over one spot on the reef
+    const s = findSurface(r, x0, d0, z0);
+    if (s) {
+      const st = { p: s.p.clone().addScaledVector(s.n, 0.9), client: null, boss: null, next: t + 2 + r() * 8 };
+      for (let q = 0, n = 2 + (r() * 2 | 0); q < n; q++) list.push(makeCreature(SP.cleaner_wrasse, st.p.clone().add(_v.set(r() - 0.5, r() - 0.5, r() - 0.5)), { st }));
+    }
+  }
   return list;
 }
 function updateCells() {
@@ -1229,7 +1247,16 @@ function updateCells() {
   }
 }
 
-let anyDead = false, lastCatchToast = -9;
+let anyDead = false, lastCatchToast = -9, lastBehaviourToast = -99;
+function pickClient(st) {   // the nearest decent-sized fish, turtle, ray or shark that isn't busy
+  let best = null, bd = 22 * 22;
+  for (const o of mobile) {
+    if (o.dead || o.leader || o.prey || o.clean || o.st || o.sleep || o.air < 0 || o.surfUntil > t || o.flee > t || o.inspect) continue;
+    if (!['fish', 'turtle', 'ray', 'shark'].includes(o.sp.type) || (o.sp.type === 'fish' && o.sp.hab !== 'reef') || o.size < 0.3 || o.sp.glow || Math.abs(o.p.y - st.p.y) > 15) continue;
+    const dd = o.p.distanceToSquared(st.p); if (dd < bd) { bd = dd; best = o; }
+  }
+  return best;
+}
 function kill(c) { c.dead = true; anyDead = true; }
 function toast(msg, ms = 4500) { const el = document.createElement('div'); el.className = 'toast'; el.textContent = msg; $('toasts').prepend(el); setTimeout(() => el.remove(), ms); while ($('toasts').children.length > 4) $('toasts').lastChild.remove(); }
 const angLerp = (a, b, k) => { const d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a + d * k; };
@@ -1237,7 +1264,7 @@ const _des = new Vector3(), _to = new Vector3(), UP = new Vector3(0, 1, 0);
 function stepCreature(c, dt, dSpeed) {
   const sp = c.sp, dist = _to.subVectors(diver.p, c.p).length();
   if (c.fixed) {
-    if (sp.mood === 'hide') { const near = dist < 3 + dSpeed * 1.5; c.hide = lerp(c.hide, near ? 1 : 0, Math.min(1, dt * (near ? 6 : 0.5))); }
+    if (sp.mood === 'hide') { const near = dist < 1.5 + 3 * (0.45 + presence.noise * 1.3); c.hide = lerp(c.hide, near ? 1 : 0, Math.min(1, dt * (near ? 6 : 0.5))); }
     c.ph += dt * c.kind.freq; return;
   }
   if (sp.bait && !c.leader && t > (c.ballCheck || 0)) {   // a predator nearby turns the school into a bait ball
@@ -1248,24 +1275,75 @@ function stepCreature(c, dt, dSpeed) {
   let urgency = 1.5;
   if (c.sleep) { c.v.multiplyScalar(0.9); c.ph += dt * 0.5; c.swim = 0.2; return; }
   _des.set(0, 0, 0);
-  // reaction to the diver
-  const mood = sp.mood || (['shark', 'whale', 'ray', 'turtle'].includes(sp.type) ? 'calm' : 'shy');
-  if (mood === 'shy' && sp.type !== 'jelly' && sp.type !== 'siphonophore') { if (dist < 1.5 + c.size * 3 + dSpeed * 1.4) c.flee = t + 1.2; }
-  else if (mood === 'puff') { const near = dist < 2.2 + dSpeed; c.puff = lerp(c.puff, near ? 1 : 0, Math.min(1, dt * (near ? 5 : 0.6))); }
-  else if (mood === 'curious' && dist < 20) {
-    if (dSpeed > 4 && dist < 6) c.flee = t + 1;
-    else if (dSpeed < 2.5) {   // come closer, but keep a comfortable distance and circle
-      if (dist > 4 + c.size) _des.copy(_to).multiplyScalar(spd * 1.1 / dist);
-      else if (dist < 2.2 + c.size * 0.6) _des.copy(_to).multiplyScalar(-spd / dist);
-      else _des.crossVectors(_to, UP).setLength(spd * 0.6);
+  let busy = false;   // a behaviour (breathing, being cleaned, cleaning) is steering this animal
+  // air breathers swim up at a slant, hang at the surface for a few breaths, then go back down
+  if (c.air !== undefined) {
+    const d = -c.p.y;
+    if (c.surfUntil > t) { busy = true; urgency = 2; c.surf = d < 1.3; _des.set(c.v.x * 0.3, (0.35 - d) * 1.5, c.v.z * 0.3); }
+    else if (c.air < 0) {
+      busy = true; urgency = 2;
+      if (d < 0.9) { const [a, b] = airOf(sp); c.surfUntil = t + 4 + Math.random() * 3; c.air = a + Math.random() * (b - a); }
+      else _des.set(Math.cos(c.yaw) * 0.5, 1, -Math.sin(c.yaw) * 0.5).setLength(spd * 1.2);
+    } else { c.air -= dt; if (c.surf) { c.surf = false; c.next = 0; } }
+  }
+  // cleaning stations: cleaner wrasse dance to advertise, then dart over a client that holds still while they pick it clean
+  if (c.st) {
+    const st = c.st; busy = true; urgency = 3;
+    if (!st.boss || st.boss.dead) st.boss = c;
+    if (st.boss === c && !st.client && t > st.next) { st.client = pickClient(st); if (st.client) { st.client.clean = st; st.client.cleanUntil = t + 14 + Math.random() * 10; } else st.next = t + 4; }
+    const cl = st.client;
+    if (cl && !cl.dead && cl.cleaning) {
+      if (!c.pick || t > c.pickNext) { c.pick = new Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).setLength(cl.size * 0.4 + 0.06); c.pickNext = t + 0.5 + Math.random(); }
+      _des.copy(cl.p).add(c.pick).sub(c.p).multiplyScalar(3); if (_des.length() > spd * 3) _des.setLength(spd * 3);
+    } else _des.copy(st.p).add(_v.set(Math.sin(t * 0.8 + c.ph) * 0.5, Math.sin(t * 3 + c.ph) * 0.25, Math.cos(t * 0.7 + c.ph) * 0.5)).sub(c.p).multiplyScalar(1.5);
+  }
+  if (c.clean && !busy) {
+    const st = c.clean;
+    if (t > c.cleanUntil || st.client !== c || c.p.distanceTo(st.p) > 35 || c.flee > t) { c.clean = null; c.cleaning = false; if (st.client === c) { st.client = null; st.next = t + 6 + Math.random() * 14; } }
+    else {
+      busy = true;
+      _v2.copy(st.p).add(_v.set(0, 0.3 + c.size * 0.35, 0)).sub(c.p); const dd = _v2.length();
+      c.cleaning = dd < 0.6 + c.size * 0.5;
+      if (c.cleaning) { _des.copy(_v2).multiplyScalar(0.8); urgency = 1; if (!c.cleanSeen) { c.cleanSeen = true; if (dist < 20 && t > lastBehaviourToast + 40) lastBehaviourToast = t, toast(`🧽 Cleaning station: ${an(label(sp).toLowerCase())} is holding still while cleaner wrasse pick it clean`); } }
+      else _des.copy(_v2).setLength(Math.min(spd, dd));
     }
-  } else if (mood === 'calm' && dist < c.size * 0.7 + 2) c.flee = t + 0.6;
+  }
+  if (busy && !up) _des.addScaledVector(currentAt(c.p), -0.95);
+  // reaction to the diver: how close it lets you come depends on how much noise you make, how fast you're closing in, and how used to you it is
+  const noise = presence.noise, closing = dist > 0.01 ? Math.max(0, -diver.v.dot(_to) / dist) : 0;
+  c.trust = clamp(c.trust + dt * (dist < 14 && noise < 0.3 ? 0.08 : noise > 0.5 && dist < 20 ? -0.4 : -0.02), 0, 1);
+  const wary = clamp(0.45 + noise * 1.3 + closing * 0.4, 0.35, 2.4) * (1 - 0.55 * c.trust);
+  const mood = c.st ? 'bold' : sp.mood || (['shark', 'whale', 'ray', 'turtle'].includes(sp.type) ? 'calm' : 'shy');
+  if (mood === 'shy' && sp.type !== 'jelly' && sp.type !== 'siphonophore') { if (dist < (1.2 + c.size * 3) * wary) c.flee = t + 1.2; }
+  else if (mood === 'puff') { const near = dist < 1.4 + 1.6 * wary; c.puff = lerp(c.puff, near ? 1 : 0, Math.min(1, dt * (near ? 5 : 0.6))); }
+  else if (mood === 'curious') {
+    if (c.inspect && t > c.inspect) { c.inspect = 0; c.bored = t + 25 + Math.random() * 35; }   // loses interest for a while
+    if (noise > 0.65 && dist < 7) { c.flee = t + 1.2; if (c.inspect) { c.inspect = 0; c.bored = t + 20; } }
+    else if (!busy && !c.inspect && dist < 24 && noise < 0.4 && t > (c.bored || 0) && !c.leader) {
+      c.inspect = t + 12 + Math.random() * 18;
+      if (dist < 20 && t > lastBehaviourToast + 25) lastBehaviourToast = t, toast(`👀 ${cap(an(label(sp).toLowerCase()))} is coming over to check you out — stay calm`);
+    }
+    c.circling = false;
+    if (c.inspect && !busy && noise < 0.55) {   // come closer, keep a comfortable distance (which shrinks as it gets used to you) and circle
+      const near = (2.2 + c.size * 0.8) * (1 - 0.35 * c.trust), far = (4 + c.size) * (1 - 0.3 * c.trust);
+      if (dist > far) _des.copy(_to).multiplyScalar(spd * 1.1 / dist);
+      else if (dist < near) _des.copy(_to).multiplyScalar(-spd / dist);
+      else { _des.crossVectors(_to, UP).setLength(spd * 0.6); c.circling = true; }
+    }
+  } else if (mood === 'calm' && dist < (c.size * 0.7 + 2) * wary) c.flee = t + 0.6;
+  if (c.kind.ceph) {   // octopus, cuttlefish and squid flash colours when startled; octopus and squid may ink as they jet away
+    if ((c.flee > t && !c.fleeFrom) || dist < 2.5 * wary) {
+      if (c.flee > t && !c.fleeFrom && noise > 0.4 && dist < 10 && t > (c.inkNext || 0) && sp.type !== 'cuttle' && !sp.glow && !sp.f?.glass && -c.p.y < 1000) { c.inkNext = t + 20; for (let i = 0; i < 45; i++) inkList.push({ p: c.p.clone(), v: new Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(0.9), age: -i * 0.02 }); }
+      c.flash = 1;
+    }
+    c.flash = Math.max(0, c.flash - dt * 0.25);
+  }
   // predators hunt
-  if ((sp.pred || c.hunter) && t > c.full && !c.leader) {
+  if ((sp.pred || c.hunter) && t > c.full && !c.leader && !c.clean) {
     if (!c.prey && t > c.next) {
       let best = null, bd = 18;
       for (const o of mobile) {
-        if (o === c || o.dead || (o.sp.pred && o.size > c.size * 0.5)) continue;
+        if (o === c || o.dead || o.st || (o.sp.pred && o.size > c.size * 0.5)) continue;   // even predators leave cleaners alone
         if (!['fish', 'squid', 'crust', 'cuttle'].includes(o.sp.type) || o.size > c.size * 0.35) continue;
         const dd = o.p.distanceTo(c.p); if (dd < bd) { bd = dd; best = o; }
       }
@@ -1307,7 +1385,11 @@ function stepCreature(c, dt, dSpeed) {
       if (c.leader) c.leader = null;
       if (t > c.next || c.p.distanceTo(c.tgt) < 0.8) {
         const R = Math.random;
-        if (sp.hab === 'reef' || sp.hab === 'benthic') { const r = c.rest ? 3 : 12; c.tgt.copy(c.home).add(_v.set((R() - 0.5) * r, (R() - 0.5) * r / 3, (R() - 0.5) * r)); }
+        if (sp.type === 'shark' && sp.hab === 'reef' && !c.rest && !sp.f?.nurse && !sp.f?.zebra) {   // reef sharks patrol up and down the reef edge
+          if (!c.patrol || Math.abs(c.p.z - c.home.z) > 70) c.patrol = c.p.z > c.home.z ? -1 : 1;
+          const z = c.p.z + c.patrol * (15 + R() * 25), d = clamp(-c.home.y + (R() - 0.5) * 8, Math.max(sp.depth[0], topDepth(z) + 2), sp.depth[1]);
+          c.tgt.set(wallX(d, z) + 3 + R() * 6, -d, z);
+        } else if (sp.hab === 'reef' || sp.hab === 'benthic') { const r = c.rest ? 3 : 12; c.tgt.copy(c.home).add(_v.set((R() - 0.5) * r, (R() - 0.5) * r / 3, (R() - 0.5) * r)); }
         else c.tgt.copy(c.p).add(_v.set((R() - 0.5) * 40, (R() - 0.5) * 8, (R() - 0.5) * 40));
         c.tgt.y = -clamp(-c.tgt.y, Math.max(sp.depth[0], 0.5), Math.min(sp.depth[1], FLOOR - 1));
         pushOut(c.tgt, 1 + c.size * 0.5); c.next = t + 4 + R() * 8;
@@ -1342,7 +1424,7 @@ function stepDiver(dt) {
   diver.yaw -= lx * dt * 1.8; diver.pitch = clamp(diver.pitch + ly * dt * 1.3, -1.45, 1.45);   // arrow keys look around
   const vt = (keys.Space || touch.up ? 1 : 0) - (keys.KeyC || keys.ControlLeft || touch.down ? 1 : 0);
   const turbo = keys.ShiftLeft || keys.ShiftRight || touch.fast, depth = -diver.p.y;
-  const max = turbo ? 12 + depth * 0.05 : 1.8;   // turbo scales with depth so the trenches are reachable
+  const max = turbo ? 12 + depth * 0.05 : keys.KeyQ ? 0.6 : 1.8;   // turbo scales with depth so the trenches are reachable; Q fins gently
   _des.set(0, 0, 0).addScaledVector(f, fw).addScaledVector(r, st).add(_v.set(0, vt, 0));
   if (_des.lengthSq() > 0) _des.setLength(max);
   diver.v.lerp(_des, Math.min(1, dt * (turbo ? 3 : 2.2)));
@@ -1352,13 +1434,19 @@ function stepDiver(dt) {
   const prevBreath = diver.breath;
   if (!gear().scuba) return;   // suits and subs don't breathe bubbles
   if (prevBreath > 1.9 && (diver.breath - dt) <= 1.9 && depth > 1) audio.inhale(turbo);
-  if ((diver.breath -= dt) < 0 && depth > 1) { diver.breath = turbo ? 2.4 : 3.5; audio.exhale(turbo); if (depth > 1.5) for (let i = 0; i < (gearIdx ? 14 : 8); i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
+  if ((diver.breath -= dt) < 0 && depth > 1) { diver.breath = turbo ? 2.4 : 3.5; audio.exhale(turbo); presence.spike += gearIdx ? 0.14 : 0.08; if (depth > 1.5) for (let i = 0; i < (gearIdx ? 14 : 8); i++) bubbleList.push({ p: diver.p.clone().addScaledVector(f, 0.8).add(_v.set(0, 0.2, 0)), age: -i * 0.07, s: 0.5 + Math.random() }); }
+}
+
+const _ft = new Color(), _fw = new Color(1.5, 1.4, 1.3);
+function flashTint(c) {   // pulsing pale-dark waves of colour
+  const k = c.flash * (0.5 + 0.5 * Math.sin(t * 7 + c.ph));
+  return _ft.copy(c.tint).lerp(_fw, k * 0.7).multiplyScalar(1 - c.flash * 0.3 * (0.5 + 0.5 * Math.sin(t * 13 + c.ph * 2)));
 }
 
 // ---------- main loop ----------
 const _mat = new Matrix4(), _pos = new Vector3(), _scl = new Vector3();
 let last = performance.now(), hudT = 0, pickT = 0, aimed = null, fps = 60;
-let frameMs = 0, audioT = 0;
+let frameMs = 0, audioT = 0, skipRender = false;
 function frame(now, manual) {
   if (!manual) requestAnimationFrame(frame);
   const f0 = performance.now();
@@ -1373,6 +1461,11 @@ function frame(now, manual) {
   anyDead = false;
   for (const x of summoned) live.push(x);
   const dSpeed = diver.v.length();
+  {   // cruising at normal speed is a steady 0.3; slowing down lets it settle, sprinting or a sub's thrusters push it up
+    const target = (dSpeed <= 1.9 ? 0.3 * dSpeed / 1.8 : 0.3 + (dSpeed - 1.9) / 4) + (gear().hum ? 0.12 : 0);
+    presence.base = lerp(presence.base, clamp(target, 0, 1), Math.min(1, dt * 1.2)); presence.spike *= Math.exp(-dt * 0.6);
+    presence.noise = clamp(presence.base + presence.spike, 0, 1);
+  }
   mobile.length = 0; for (const c of live) if (!c.fixed) mobile.push(c);
   for (const c of live) stepCreature(c, dt, dSpeed);
 
@@ -1431,7 +1524,7 @@ function frame(now, manual) {
       _scl.set(c.size * puff, c.size * puff * (1 - c.hide * 0.85), c.size * puff * (1 + c.puff * 0.5));
       _pos.copy(c.p); if (c.hide) _pos.y -= c.size * c.hide * 0.1;
       _mat.compose(_pos, c.q, _scl); k.mesh.setMatrixAt(i, _mat);
-    } k.mesh.instanceColor.setXYZ(i, c.tint.r, c.tint.g, c.tint.b); k.phase.array[i] = c.ph; k.amp.array[i] = c.swim ?? 1; k.list[i] = c;
+    } const tn = c.flash > 0.02 ? flashTint(c) : c.tint; k.mesh.instanceColor.setXYZ(i, tn.r, tn.g, tn.b); k.phase.array[i] = c.ph; k.amp.array[i] = c.swim ?? 1; k.list[i] = c;
     if (c.sleep && d2 < 3600 && nc < 200) { _mat.compose(c.p, c.q, _scl.set(c.size * 0.62, c.size * 0.34, c.size * 0.32)); cocoons.setMatrixAt(nc++, _mat); }
     if (c.sp.glow && glowK > 0 && d2 < 3600) {
       const col = _c.set(c.sp.glow.c).multiplyScalar(glowK * (0.6 + 0.4 * Math.sin(t * 2.5 + c.ph)) * Math.min(1, d2 / 9));   // halos fade up close so they don't blind the camera
@@ -1470,6 +1563,11 @@ function frame(now, manual) {
   for (let i = bitList.length - 1; i >= 0; i--) if (bitList[i].age > 1.5) bitList.splice(i, 1);
   for (const b of bitList) if (tn < 200) { tp[tn * 3] = b.p.x; tp[tn * 3 + 1] = b.p.y; tp[tn * 3 + 2] = b.p.z; tn++; }
   bits.geometry.setDrawRange(0, tn); bits.geometry.attributes.position.needsUpdate = true;
+  const ip = ink.geometry.attributes.position.array; let inn = 0;
+  for (const b of inkList) { b.age += dt; if (b.age > 0) { b.p.addScaledVector(b.v, dt).addScaledVector(currentAt(b.p), dt * 0.5); b.v.multiplyScalar(0.97); } }
+  for (let i = inkList.length - 1; i >= 0; i--) if (inkList[i].age > 7) inkList.splice(i, 1);
+  for (const b of inkList) if (b.age > 0 && inn < 400) { ip[inn * 3] = b.p.x; ip[inn * 3 + 1] = b.p.y; ip[inn * 3 + 2] = b.p.z; inn++; }
+  ink.geometry.setDrawRange(0, inn); ink.geometry.attributes.position.needsUpdate = true;
   if (diveOpts.night || depth > 200) {   // plankton flash blue-green wherever the water is disturbed
     const dsp = diver.v.length(); let n = dsp * dt * 45;
     while (n-- > Math.random()) sparkList.push({ p: diver.p.clone().addScaledVector(f, -0.9 - Math.random() * 0.6).add(_v.set((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.8)), age: 0, life: 0.6 + Math.random() * 0.9 });
@@ -1481,7 +1579,7 @@ function frame(now, manual) {
   sparks.geometry.setDrawRange(0, kn); sparks.geometry.attributes.position.needsUpdate = sparks.geometry.attributes.color.needsUpdate = true;
 
   CAUST.uTime.value = t;
-  renderFrame();
+  if (!skipRender) renderFrame();
 
   if ((audioT -= dt) < 0) { audioT = 0.5; let wn = false, sn = false; for (const c of mobile) if (c.sp.type === 'whale' && !c.sp.f?.dolphin && !c.sp.f?.sealion && !c.sp.f?.dugong) { const dd = c.p.distanceTo(diver.p); if (dd < 250) { wn = true; if (c.sp.id === 'sperm' && dd < 120) sn = true; } } audio.update(depth, t, wn, sn); audio.hum((G.hum || 0) * (0.6 + Math.min(1, diver.v.length() / 3) * 0.6)); }
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
@@ -1529,6 +1627,8 @@ function updateHud() {
   const light = ambient(d) * 100;
   $('light').textContent = light >= 1 ? `${light.toFixed(0)}%` : light >= 0.01 ? `${light.toFixed(2)}%` : 'none';
   $('nearby').textContent = live.filter(c => !c.fixed && c.p.distanceToSquared(diver.p) < 900).length;
+  const n = presence.noise; $('calm').className = n < 0.22 ? 'calm' : n < 0.5 ? 'steady' : 'noisy';
+  $('calm').lastChild.textContent = n < 0.22 ? 'Calm' : n < 0.5 ? 'Steady' : 'Noisy'; $('calm').firstChild.firstChild.style.width = `${Math.round(100 - n * 100)}%`;
   const cu = currentAt(diver.p), cv = cu.length();
   $('cur').innerHTML = cv < 0.03 ? 'none' : `<span class="arrow" style="transform:rotate(${Math.atan2(cu.x * Math.sin(diver.yaw) + cu.z * Math.cos(diver.yaw), cu.x * Math.cos(diver.yaw) - cu.z * Math.sin(diver.yaw)) * 180 / Math.PI}deg)">↑</span> ${currentWord(cv)} · ${cv.toFixed(1)} m/s`;
   $('gauge-mark').style.top = `${gaugePos(d) * 100}%`;
@@ -1542,6 +1642,10 @@ function behaviour(sp) {
   if (sp.mood === 'puff') b.push('Puffs up when you get close');
   if (sp.mood === 'hide') b.push('Hides in its burrow when you get close');
   if (!b.length) b.push(sp.hab === 'benthic' ? 'Lives fixed to the reef or seabed' : ['shark', 'whale', 'ray', 'turtle'].includes(sp.type) ? 'Calm — keeps a little distance' : 'Shy — flees if you rush at it');
+  if (sp.lair?.includes('station')) b.push('Runs a cleaning station for bigger animals');
+  if (airOf(sp)) b.push('Breathes air — comes up to the surface every few minutes');
+  if (['octopus', 'cuttle', 'squid'].includes(sp.type)) b.push('Flashes colours when startled');
+  if (sp.type === 'shark' && sp.hab === 'reef' && !sp.f?.nurse && !sp.f?.zebra) b.push('Patrols the reef edge');
   return b.join(' · ');
 }
 const whereText = sp => sp.range || (sp.regions === 'all' ? 'Widespread, including the Maldives' : sp.regions.map(r => REGION[r]).join(', '));
@@ -1771,12 +1875,13 @@ async function shoot() {
   strobe.intensity = 0;
   const flash = $('flash'); flash.style.transition = 'none'; flash.style.opacity = useStrobe ? '0.85' : '0.35'; requestAnimationFrame(() => { flash.style.transition = 'opacity .45s ease-out'; flash.style.opacity = '0'; });
   shutterSound();
-  if (useStrobe) for (const c of mobile) if (c.p.distanceTo(diver.p) < 9 && !['shark', 'whale', 'turtle'].includes(c.sp.type) && c.sp.mood !== 'curious') { c.flee = t + 1.5; c.fleeFrom = null; }
+  presence.spike += useStrobe ? 0.55 : 0.1;
+  if (useStrobe) for (const c of mobile) if (c.p.distanceTo(diver.p) < 9 && !['shark', 'whale', 'turtle'].includes(c.sp.type) && c.sp.mood !== 'curious' && !c.st && c.trust < 0.6) { c.flee = t + 1.5; c.fleeFrom = null; }
   const b = shot.best;
   const photo = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, time: Date.now(), dive: diveId, site: site.name, area: site.area, depth: Math.round(-diver.p.y),
     img: cv.toDataURL('image/jpeg', 0.85), stars: shot.stars, tips: shot.tips, strobe: useStrobe, zoom: +zoom.toFixed(1),
     subject: b ? { id: b.c.sp.id, kind: kindName(b.c.sp), dist: +b.dist.toFixed(1), depth: Math.round(-b.c.p.y), count: shot.same,
-      note: b.c.puff > 0.6 ? 'it had puffed itself up' : b.c.hide > 0.5 ? 'it was pulling back into its burrow' : b.c.prey ? 'it was chasing another fish' : b.c.sleep ? 'it was asleep in a bubble of mucus' : b.c.sp.mood === 'curious' ? 'it swam over to look at you' : b.c.fixed ? '' : b.c.flee > t ? 'it darted away from you' : '' } : null,
+      note: b.c.cleaning ? 'cleaner wrasse were picking it clean' : b.c.st ? 'it was working at its cleaning station' : b.c.surf ? 'it was taking a breath at the surface' : b.c.flash > 0.3 ? 'it was flashing colours' : b.c.circling ? 'it was circling you' : b.c.puff > 0.6 ? 'it had puffed itself up' : b.c.hide > 0.5 ? 'it was pulling back into its burrow' : b.c.prey ? 'it was chasing another fish' : b.c.sleep ? 'it was asleep in a bubble of mucus' : b.c.inspect ? 'it swam over to look at you' : b.c.fixed ? '' : b.c.flee > t ? 'it darted away from you' : '' } : null,
     others: shot.others, researched: false, night: diveOpts.night };
   photos.push(photo); updateShotCount(); photoDB.put(photo);
   const st = '★'.repeat(shot.stars) + '☆'.repeat(3 - shot.stars);
@@ -2050,6 +2155,10 @@ const GOALS = [
   { id: 'macro', icon: '🔬', name: 'Macro master', desc: 'A ★★★ photo of an animal smaller than 10 cm', test: p => p.subject && SP[p.subject.id].size < 0.1 && p.stars === 3 },
   { id: 'crowd', icon: '🐠', name: 'Busy reef', desc: '4 different kinds of animal in one frame', test: p => !!p.subject && p.others.length >= 3 },
   { id: 'garden', icon: '🪱', name: 'Garden party', desc: '5 or more garden eels in one frame', test: p => p.subject?.id === 'garden_eel' && p.subject.count >= 5 },
+  { id: 'clean', icon: '🧽', name: 'Cleaning station', desc: 'Photograph an animal holding still while cleaner wrasse pick it clean', test: (p, c) => !!c?.cleaning || !!c?.st?.client?.cleaning },
+  { id: 'breath', icon: '🫧', name: 'Coming up for air', desc: 'Photograph a turtle, sea snake or dolphin taking a breath at the surface', test: (p, c) => !!c?.surf },
+  { id: 'flash', icon: '🐙', name: 'Colour show', desc: 'Photograph an octopus, cuttlefish or squid flashing colours', test: (p, c) => c?.flash > 0.3 },
+  { id: 'close', icon: '🤝', name: 'Close encounter', desc: 'A ★★★ photo of a curious animal circling you, from less than 4 m away — stay calm and let it come to you', test: (p, c) => !!c?.circling && p.stars === 3 && p.subject.dist < 4 },
 ];
 function completeGoal(g) { if (progress.goals[g.id]) return; progress.goals[g.id] = Date.now(); toast(`🎯 Challenge complete: ${g.name}`); saveProgress(); }
 function checkGoals(photo, c) {
@@ -2262,6 +2371,6 @@ $('opt-time').onclick = e => { const v = e.target.closest('button')?.dataset.v; 
 renderSitePicker(); applyTouch(); setPanelMin(!!settings.panelMin);
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
-window.scuba = { lights: { torch, diverLamp, sun, hemi }, diverModel, step: (n, dt = 1 / 30) => { for (let i = 0; i < n; i++) frame(performance.now(), dt); }, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
+window.scuba = { lights: { torch, diverLamp, sun, hemi }, diverModel, step: (n, dt = 1 / 30, draw = true) => { skipRender = !draw; for (let i = 0; i < n; i++) frame(performance.now(), dt); skipRender = false; }, presence, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
 requestAnimationFrame(frame);
 })();

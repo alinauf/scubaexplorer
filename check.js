@@ -12,7 +12,8 @@ for (const s of species) {
   assert(s.regions === 'all' || (s.regions === 'world' && s.range) || (Array.isArray(s.regions) && s.regions.every(r => ['MV', 'EG', 'ID', 'AU', 'PW'].includes(r))), `${s.id}: regions`);
   assert(['LC', 'NT', 'VU', 'EN', 'CR', 'DD', 'NE'].includes(s.iucn), `${s.id}: iucn`);
   assert(!s.mood || ['curious', 'puff', 'hide'].includes(s.mood), `${s.id}: mood`);
-  assert(s.host || s.ab > 0, `${s.id}: needs ab`);
+  assert(s.host || s.lair || s.ab > 0, `${s.id}: needs ab`);
+  assert(!s.lair || s.lair.every(l => ['station', 'cave', 'wreck', 'overhang'].includes(l)), `${s.id}: lair`);
   assert(s.name && s.sci && s.fact && s.c && s.size > 0, `${s.id}: missing field`);
 }
 for (const site of sites) for (const id of Object.keys(site.featured)) assert(S.get(id), `${site.id}: unknown featured ${id}`);

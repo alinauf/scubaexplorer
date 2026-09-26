@@ -134,6 +134,9 @@
   #pv .row { display: flex; gap: 8px; margin-top: auto; } #pv .row > * { flex: 1; text-align: center; text-decoration: none; }
 
   #cur .arrow { display: inline-block; font-weight: 700; color: #7fe0ff; }
+  #calm .meter { display: inline-block; width: 54px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.15); vertical-align: middle; overflow: hidden; margin-right: 4px; }
+  #calm .meter b { display: block; height: 100%; background: #5fd38a; transition: width .3s, background .3s; }
+  #calm.steady .meter b { background: #e8c24a; } #calm.noisy .meter b { background: #e8603a; }
   #target { font-size: 12px; color: #b8dcee; max-width: 250px; margin: -2px 0 8px; }
   .goal-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; margin-bottom: 18px; }
   .goal { display: grid; grid-template-columns: 30px 1fr; gap: 0 8px; background: #fff; border-radius: 10px; padding: 10px 12px; opacity: .7; }
@@ -280,6 +283,7 @@
       <dt>Water</dt><dd id="temp"></dd>
       <dt>Sunlight</dt><dd id="light"></dd>
       <dt>Animals near you</dt><dd id="nearby"></dd>
+      <dt>Your presence</dt><dd id="calm"><i class="meter"><b></b></i> <span></span></dd>
       <dt>Current</dt><dd id="cur"></dd>
     </dl>
   </div>
@@ -315,6 +319,7 @@
       <li><span class="keys"><kbd>Mouse</kbd> / <kbd>Arrows</kbd></span><span>Look around. Click the water to lock the mouse (<kbd>Esc</kbd> releases it), drag to look, or use the arrow keys.</span></li>
       <li><span class="keys"><kbd>W A S D</kbd></span><span>Swim forward, back and sideways in the direction you're looking</span></li>
       <li><span class="keys"><kbd>Space</kbd> <kbd>C</kbd></span><span>Rise and sink</span></li>
+      <li><span class="keys"><kbd>Q</kbd></span><span>Hold to fin gently — the quiet way to approach animals</span></li>
       <li><span class="keys"><kbd>Shift</kbd></span><span>Dive fast (gets faster the deeper you are). Your gear changes as you go deeper — technical trimix below 40 m, a hardsuit below 330 m, a research sub below 700 m and a full-ocean-depth sub below 6,500 m.</span></li>
       <li><span class="keys"><kbd>Click</kbd> / <kbd>E</kbd></span><span>Learn about the animal in your crosshair</span></li>
       <li><span class="keys"><kbd>F</kbd></span><span>Raise or lower your underwater camera. Click or press <kbd>Enter</kbd> to take a photo; scroll or <kbd>+</kbd>/<kbd>−</kbd> to zoom. The strobe fires automatically once it gets dim.</span></li>
@@ -324,7 +329,7 @@
       <li><span class="keys"><kbd>I</kbd></span><span>Gear viewer: spin your equipment in 360° and learn what each part does</span></li>
       <li><span class="keys"><kbd>Scroll</kbd> / <kbd>+</kbd> <kbd>−</kbd></span><span>Move the third-person camera closer or further away</span></li>
     </ul>
-    <p style="color:#b8dcee;font-size:14px">Rush at shy fish and they scatter. Stay calm and curious animals like turtles, batfish and Napoleon wrasse come to you. Puffers inflate, garden eels hide in the sand, and sharks hunt smaller fish.</p>
+    <p style="color:#b8dcee;font-size:14px">Animals notice how you dive. Sprinting, bubbles and camera flashes scare them; hover or fin gently and they let you come closer the longer you stay calm (watch <b>Your presence</b>). Curious animals like turtles, batfish and Napoleon wrasse come over to circle you. Look out for cleaning stations, turtles coming up for air, octopuses flashing colours and reef sharks patrolling the wall.</p>
     <button id="help-close" class="btn primary">Start diving</button> <span style="color:#8fb8cc;font-size:13px">or press <kbd>Esc</kbd></span>
   </div>
 </div>
