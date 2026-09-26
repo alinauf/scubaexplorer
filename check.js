@@ -16,6 +16,6 @@ for (const s of species) {
   assert(!s.lair || s.lair.every(l => ['station', 'cave', 'wreck', 'overhang'].includes(l)), `${s.id}: lair`);
   assert(s.name && s.sci && s.fact && s.c && s.size > 0, `${s.id}: missing field`);
 }
-for (const site of sites) for (const id of Object.keys(site.featured)) assert(S.get(id), `${site.id}: unknown featured ${id}`);
+for (const site of sites) { for (const id of Object.keys(site.featured)) assert(S.get(id), `${site.id}: unknown featured ${id}`); assert(!site.layout || ['caves', 'thila', 'wreck'].includes(site.layout), `${site.id}: layout`); if (site.target) assert(S.get(site.target.id), `${site.id}: unknown target`); }
 const native = species.filter(s => s.regions === 'all' || (Array.isArray(s.regions) && s.regions.includes('MV'))).length;
 console.log(`ok: ${sites.length} Maldives sites, ${species.length} species (${native} native to the Maldives)`);

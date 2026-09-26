@@ -49,11 +49,22 @@ let dayLight = 1;   // 1 by day; moonlight at night
 const ambient = d => (d <= 0 ? 1 : Math.exp(-d * 0.015)) * dayLight;   // sunlight left (≈1% at 300 m by day)
 
 // ---------- terrain: reef flat to the west (x < edge), a drop-off wall that falls to the trench floor ----------
+// Each site can reshape it (TER: reef-top depth, how steeply it slopes away from the edge, how deep it gets, how sandy the floor is),
+// carve cave pockets into the wall, and add structures — a wreck, a thila, overhangs, swim-throughs — see buildSite().
+let TER = { top: 3, slope: 0.09, max: 14, sand: 0 };
+const carves = [], structs = [];
 const edgeX = z => 5 * Math.sin(z * 0.011) + 6 * fbm(z * 0.02, 3.1);
-const plateau = (x, z) => 3 + Math.min(14, Math.max(0, edgeX(z) - x) * 0.09) + 1.4 * fbm(x * 0.05, z * 0.05) + 0.6 * fbm(x * 0.21, z * 0.21);
+const flatK = (x, z) => { const f = TER.flat; if (!f) return 1; const q = ((x - f.x) / f.rx) ** 2 + ((z - f.z) / f.rz) ** 2; return 1 - 0.85 * (1 - smooth(0.5, 1, q)); };   // smooth sand under a wreck
+const plateau = (x, z) => TER.top + Math.min(TER.max, Math.max(0, edgeX(z) - x) * TER.slope) + (1.4 * fbm(x * 0.05, z * 0.05) + 0.6 * fbm(x * 0.21, z * 0.21)) * flatK(x, z);
 const topDepth = z => plateau(edgeX(z), z);
-const wallX = (d, z) => edgeX(z) + (4 * Math.sin(d * 0.017 + z * 0.013) + 3 * fbm(d * 0.04, z * 0.04) + 1.3 * fbm(d * 0.17, z * 0.17)) * clamp((d - topDepth(z)) / 12, 0, 1);
-function pushOut(p, m) { // keep a point out of the rock
+const wallRaw = (d, z) => edgeX(z) + (4 * Math.sin(d * 0.017 + z * 0.013) + 3 * fbm(d * 0.04, z * 0.04) + 1.3 * fbm(d * 0.17, z * 0.17)) * clamp((d - topDepth(z)) / 12, 0, 1);
+function carveAt(d, z) {   // how far a cave pocket cuts back into the wall here: steep sides, a rounded back
+  let c = 0;
+  for (const k of carves) { const a = (z - k.z) / k.rz, b = (d - k.d) / k.rd, q = a * a + b * b; if (q < 1) c = Math.max(c, k.depth * Math.pow(1 - q, 0.45)); }
+  return c;
+}
+const wallX = (d, z) => wallRaw(d, z) - (carves.length ? carveAt(d, z) : 0);
+function pushOut(p, m) { // keep a point out of the rock (and out of wrecks and other structures)
   const d = -p.y, z = p.z, e = edgeX(z);
   if (p.x < e + 25) {
     const top = topDepth(z);
@@ -66,6 +77,7 @@ function pushOut(p, m) { // keep a point out of the rock
       }
     }
   }
+  for (const st of structs) if (p.x > st.lo.x - m && p.x < st.hi.x + m && p.y > st.lo.y - m && p.y < st.hi.y + m && p.z > st.lo.z - m && p.z < st.hi.z + m) st.push(p, m);
   if (-p.y > FLOOR - m) p.y = -(FLOOR - m);
   if (p.y > -0.3) p.y = -0.3;
 }
@@ -829,8 +841,8 @@ function wallTile(kz, kd) {
   for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
     const z = kz * TILE + i * S, top = topDepth(z), d = Math.min(FLOOR, Math.max(kd * TILE + j * S, top));
     const rough = clamp((d - top) / 4, 0, 1) * (0.45 * vnoise(z * 0.6, d * 0.6) + 0.18 * vnoise(z * 2.2, d * 2.2));  // ledges & knobs
-    const x = wallX(d, z) + rough;
-    pos.push(x, -d, z); uv.push(z / 5, d / 5); const c = rockColor(x, d, z).multiplyScalar(0.85 + rough * 0.4); col.push(c.r, c.g, c.b);
+    const cv = carves.length ? carveAt(d, z) : 0, x = wallX(d, z) + rough;   // cave pockets: darker the further in
+    pos.push(x, -d, z); uv.push((z - cv * 0.8) / 5, d / 5); const c = rockColor(x, d, z).multiplyScalar((0.85 + rough * 0.4) * (1 - 0.6 * clamp(cv / 3.5, 0, 1))); col.push(c.r, c.g, c.b);
   }
   for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) { const a = i * (N + 1) + j, b = a + N + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
   return tileMesh(pos, col, idx, uv);
@@ -839,10 +851,10 @@ const SAND = new Color('#e6dcbc');
 function plateauTile(kx, kz) {
   const N = 48, S = TILE / N, pos = [], col = [], idx = [], uv = [];
   for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
-    const z = kz * TILE + j * S, x = Math.min(kx * TILE + i * S, edgeX(z)), sand = fbm(x * 0.07, z * 0.07) - 0.1;
+    const z = kz * TILE + j * S, x = Math.min(kx * TILE + i * S, edgeX(z)), pd = plateau(x, z), sand = fbm(x * 0.07, z * 0.07) - 0.1 + TER.sand * smooth(19, 27, pd);   // deep floors are mostly sand
     // sand gets wave ripples; reef patches get lumpy coral rock
     const bump = sand > 0 ? 0.05 * Math.sin(x * 2.2 + z * 0.9 + vnoise(x * 0.3, z * 0.3) * 3) * smooth(0, 0.15, sand) : (0.35 * vnoise(x * 0.9, z * 0.9) + 0.15 * vnoise(x * 2.7, z * 2.7)) * smooth(0, 0.2, -sand);
-    const d = plateau(x, z) - bump;
+    const d = pd - bump;
     pos.push(x, -d, z); uv.push(x / 5, z / 5);
     const c = sand > 0 ? _c2.copy(SAND).multiplyScalar(0.92 + 0.12 * vnoise(x, z) + bump * 2) : rockColor(x, d, z).multiplyScalar(0.85 + bump * 0.5);
     if (sand > 0 && sand < 0.12) c.lerp(rockColor(x, d, z), 1 - sand / 0.12);
@@ -866,6 +878,315 @@ function updateTiles(force = false) {
 const floorGeo = new THREE.PlaneGeometry(700, 700, 40, 40); floorGeo.rotateX(-Math.PI / 2);
 { const p = floorGeo.attributes.position, col = []; for (let i = 0; i < p.count; i++) { p.setY(i, vnoise(p.getX(i) * 0.05, p.getZ(i) * 0.05) * 1.5); _c.set('#5a5046').multiplyScalar(0.8 + 0.3 * vnoise(p.getX(i) * 0.2, p.getZ(i) * 0.2)); col.push(_c.r, _c.g, _c.b); } floorGeo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); floorGeo.computeVertexNormals(); const u = floorGeo.attributes.uv; for (let i = 0; i < u.count; i++) u.setXY(i, u.getX(i) * 230, u.getY(i) * 230); }
 const floor = new THREE.Mesh(floorGeo, rockMat); scene.add(floor);
+
+// ---------- structures: the wreck, a thila, overhangs, caves and swim-throughs ----------
+// Each structure has a world-space box (lo/hi), push(p, m) to keep points out of it, dark(p) for how enclosed a spot is (0 open water → 1 pitch dark),
+// sample(r, x0, d0, z0) to find a spot on its surface inside a creature cell (so corals and reef fish settle on it), and lairs: sheltered spots for cave and wreck dwellers.
+const structMat = rockMat.clone(); structMat.side = THREE.DoubleSide; structMat.onBeforeCompile = caustify;
+const wreckTex = (() => {   // rusted, pitted steel with streaks and encrusting growth
+  const cv = makeCanvas(256, 256), g = cv.getContext('2d'), R = rng(505);
+  g.fillStyle = '#d8d4cc'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 9000; i++) { const v = 150 + R() * 105 | 0; g.fillStyle = `rgba(${v},${v * 0.92 | 0},${v * 0.85 | 0},0.5)`; g.fillRect(R() * 256, R() * 256, 1 + R() * 2, 1 + R() * 2); }
+  for (let i = 0; i < 70; i++) { const x = R() * 256, y = R() * 256, l = 20 + R() * 70, gr = g.createLinearGradient(x, y, x, y + l); gr.addColorStop(0, 'rgba(120,60,30,0.45)'); gr.addColorStop(1, 'rgba(120,60,30,0)'); g.fillStyle = gr; g.fillRect(x, y, 2 + R() * 4, l); }
+  for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(${R() < 0.5 ? '90,70,60' : '235,225,210'},${0.2 + R() * 0.3})`; g.beginPath(); g.arc(R() * 256, R() * 256, 1 + R() * 4, 0, 7); g.fill(); }
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+})();
+const wreckMat = new THREE.MeshStandardMaterial({ vertexColors: true, map: wreckTex, bumpMap: wreckTex, bumpScale: 2, roughness: 0.85, metalness: 0.15, side: THREE.DoubleSide });
+wreckMat.onBeforeCompile = caustify;
+const holeMat = new THREE.MeshStandardMaterial({ color: 0x06090b, roughness: 0.15, metalness: 0.5 });   // portholes
+let structMeshes = [];
+function addMesh(geo, mat) { const m = new THREE.Mesh(geo, mat); m.castShadow = m.receiveShadow = true; scene.add(m); structMeshes.push(m); return m; }
+function bake(geos, colorFn) {   // merge world-space pieces into one geometry with normals, colours from colorFn and world-planar uvs
+  const list = geos.map(g => { if (!g.attributes.normal) g.computeVertexNormals(); return g.index ? g.toNonIndexed() : g; });
+  let n = 0; for (const g of list) n += g.attributes.position.count;
+  const P = new Float32Array(n * 3), N = new Float32Array(n * 3), C = new Float32Array(n * 3), U = new Float32Array(n * 2); let o = 0;
+  for (const g of list) { P.set(g.attributes.position.array, o * 3); N.set(g.attributes.normal.array, o * 3); o += g.attributes.position.count; }
+  for (let i = 0; i < n; i++) {
+    const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2], ax = Math.abs(N[i * 3]), ay = Math.abs(N[i * 3 + 1]), az = Math.abs(N[i * 3 + 2]);
+    const c = colorFn(x, y, z); C[i * 3] = c.r; C[i * 3 + 1] = c.g; C[i * 3 + 2] = c.b;
+    [U[i * 2], U[i * 2 + 1]] = ay >= ax && ay >= az ? [x / 5, z / 5] : ax >= az ? [z / 5, y / 5] : [x / 5, y / 5];   // textures tile in world space without stretching
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3)); g.setAttribute('color', new THREE.BufferAttribute(C, 3)); g.setAttribute('uv', new THREE.BufferAttribute(U, 2));
+  g.computeBoundingSphere(); return g;
+}
+const bumpy = (g, amt, f = 0.9) => {   // roughen a rock: push each vertex along its normal by a bit of noise
+  if (!g.attributes.normal) g.computeVertexNormals();
+  const p = g.attributes.position, n = g.attributes.normal;
+  for (let i = 0; i < p.count; i++) { const k = amt * (vnoise(p.getX(i) * f + 7.1, p.getY(i) * f + p.getZ(i) * f * 0.7) * 0.7 + vnoise(p.getX(i) * f * 3, p.getZ(i) * f * 3 + p.getY(i)) * 0.3); p.setXYZ(i, p.getX(i) + n.getX(i) * k, p.getY(i) + n.getY(i) * k, p.getZ(i) + n.getZ(i) * k); }
+  g.computeVertexNormals(); return g;
+};
+const rockCol = (x, y, z) => rockColor(x, -y, z);
+
+// colliders: boxes (optionally turned by a yaw), ellipsoids, and half-torus arches
+const box = (cx, cy, cz, hx, hy, hz, yaw = 0) => ({ k: 'box', c: new Vector3(cx, cy, cz), h: new Vector3(hx, hy, hz), cy: Math.cos(yaw), sy: Math.sin(yaw), yaw });
+function colPush(c, p, m) {
+  if (c.k === 'box') {
+    const dx = p.x - c.c.x, dy = p.y - c.c.y, dz = p.z - c.c.z, lx = dx * c.cy - dz * c.sy, lz = dx * c.sy + dz * c.cy;
+    const ox = c.h.x + m - Math.abs(lx), oy = c.h.y + m - Math.abs(dy), oz = c.h.z + m - Math.abs(lz);
+    if (ox <= 0 || oy <= 0 || oz <= 0) return;
+    let nx = lx, ny = dy, nz = lz;
+    if (ox < oy && ox < oz) nx = Math.sign(lx || 1) * (c.h.x + m); else if (oy < oz) ny = Math.sign(dy || 1) * (c.h.y + m); else nz = Math.sign(lz || 1) * (c.h.z + m);
+    p.set(c.c.x + nx * c.cy + nz * c.sy, c.c.y + ny, c.c.z - nx * c.sy + nz * c.cy);
+  } else if (c.k === 'ell') {
+    const rx = c.r.x + m, ry = c.r.y + m, rz = c.r.z + m, qx = (p.x - c.c.x) / rx, qy = (p.y - c.c.y) / ry, qz = (p.z - c.c.z) / rz, L = Math.hypot(qx, qy, qz);
+    if (L < 1 && L > 1e-6) p.set(c.c.x + qx / L * rx, c.c.y + qy / L * ry, c.c.z + qz / L * rz);
+  } else if (c.k === 'arch') {   // the tube follows a half circle of radius R standing on the ground, in the plane of axis a and up
+    const dx = p.x - c.c.x, dy = p.y - c.c.y, dz = p.z - c.c.z, x = dx * c.a.x + dz * c.a.z, w = -dx * c.a.z + dz * c.a.x;
+    let qx, qy; if (dy < 0) { qx = Math.sign(x || 1) * c.R; qy = 0; } else { const L = Math.hypot(x, dy) || 1; qx = x / L * c.R; qy = dy / L * c.R; }
+    const vx = x - qx, vy = dy - qy, dist = Math.hypot(vx, vy, w), lim = c.r + m;
+    if (dist < lim && dist > 1e-6) { const k = lim / dist, nx = qx + vx * k, ny = qy + vy * k, nw = w * k; p.set(c.c.x + nx * c.a.x - nw * c.a.z, c.c.y + ny, c.c.z + nx * c.a.z + nw * c.a.x); }
+  }
+}
+const colRadius = c => c.k === 'box' ? c.h.length() : c.k === 'ell' ? Math.max(c.r.x, c.r.y, c.r.z) : c.R + c.r;
+function makeStruct(kind, cols, extra = {}) {
+  const st = { kind, cols, lo: new Vector3(1e9, 1e9, 1e9), hi: new Vector3(-1e9, -1e9, -1e9), push: (p, m) => { for (const c of cols) colPush(c, p, m); }, dark: () => 0, sample: null, lairs: [] };
+  for (const c of cols) { const r = colRadius(c); st.lo.min(_v.copy(c.c).subScalar(r)); st.hi.max(_v.copy(c.c).addScalar(r)); }
+  Object.assign(st, extra); structs.push(st); return st;
+}
+function darkAt(p) {   // the most enclosed structure at this point (also remembers which kind of place it is)
+  let v = 0; darkAt.kind = null;
+  for (const st of structs) if (p.x > st.lo.x - 2 && p.x < st.hi.x + 2 && p.y > st.lo.y - 2 && p.y < st.hi.y + 2 && p.z > st.lo.z - 2 && p.z < st.hi.z + 2) { const k = st.dark(p); if (k > v) { v = k; darkAt.kind = st.kind; } }
+  return v;
+}
+// benthic creatures settle on structure surfaces facing any way: turn their "up" to the surface normal
+const _an = new Vector3();
+const alignTo = (c, n, r) => { _an.copy(n); if (n.y > -0.5) _an.y += 1.2; c.q.setFromUnitVectors(UP, _an.normalize()).multiply(_q.setFromAxisAngle(UP, r() * 6.283)); c.yaw = 0; };   // lean out from the surface but grow toward the light (ceilings: hang down)
+
+// an overhang: a flattened, lumpy ledge of rock sticking out of the wall, shading the reef under it
+function buildLedge(cx, cy, cz, rx, ry, rz, R) {
+  const c = { k: 'ell', c: new Vector3(cx, cy, cz), r: new Vector3(rx, ry, rz) };
+  const g = bumpy(new THREE.SphereGeometry(1, 32, 16).scale(rx, ry, rz).translate(cx, cy, cz), Math.min(ry * 0.8, 0.7), 0.6);
+  addMesh(bake([g], rockCol), structMat);
+  const under = new Vector3(cx + rx * 0.35, cy - ry - 1, cz), spots = [];
+  for (let i = 0; i < 6; i++) { const ox = (R() * 0.9 - 0.2) * rx, oz = (R() - 0.5) * 1.6 * rz, k = 1 - (ox / rx) ** 2 - (oz / rz) ** 2; if (k > 0.05) spots.push({ p: new Vector3(cx + ox, cy - ry * Math.sqrt(k) * 0.9, cz + oz), n: new Vector3(0, -1, 0) }); }
+  return makeStruct('overhang', [c], {
+    dark: p => { const a = (p.x - cx) / (rx * 1.1), b = (p.z - cz) / (rz * 1.1); return p.y < cy && p.y > cy - ry - 3.5 && a > -1 && a < 1 && b * b < 1 ? 0.3 * (1 - b * b) : 0; },
+    lairs: [{ kind: 'overhang', p: under, r: Math.min(rx, rz) * 0.8, spots }],
+  });
+}
+// a cave: a pocket carved back into the wall, with a lip of rock over its mouth
+function buildWallCave(z, d, rz, rd, depth, R) {
+  const k = { z, d, rz, rd, depth }; carves.push(k);
+  const x0 = wallRaw(d, z);
+  buildLedge(wallRaw(d - rd * 0.8, z) + 0.7, -(d - rd * 0.9), z, 1.8 + R(), 0.9, rz * 1.15, R);
+  const spots = [];
+  for (let i = 0; i < 6; i++) { const zz = z + (R() - 0.5) * rz, dd = d + rd * (0.3 + R() * 0.5); spots.push({ p: new Vector3(wallX(dd, zz) + 0.05, -dd, zz), n: new Vector3(0.3, 1, 0).normalize() }); }
+  for (let i = 0; i < 4; i++) { const zz = z + (R() - 0.5) * rz, dd = d - rd * (0.3 + R() * 0.4); spots.push({ p: new Vector3(wallX(dd, zz) + 0.4, -dd, zz), n: new Vector3(0, -1, 0) }); }   // cup corals on the ceiling
+  return makeStruct('cave', [], {
+    lo: new Vector3(x0 - depth - 1, -(d + rd), z - rz), hi: new Vector3(x0 + 2, -(d - rd), z + rz), push: () => {},
+    dark: p => { const into = wallRaw(-p.y, p.z) - p.x, cv = carveAt(-p.y, p.z); return into > 0 && cv > 0.3 ? 0.88 * clamp(into / (depth * 0.55), 0, 1) : 0; },
+    lairs: [{ kind: 'cave', p: new Vector3(x0 - depth * 0.5, -d, z), r: Math.min(rz, rd) * 0.8, spots }],
+  });
+}
+// a swim-through: a few rock arches in a row make a short tunnel you can fin through
+function buildArches(x, z, ax, az, n, R0, r0) {
+  const a = new Vector3(ax, 0, az).normalize(), along = new Vector3(-a.z, 0, a.x), cols = [], geos = [];
+  const curve = new THREE.Curve(); curve.getPoint = (u, out = new Vector3()) => { const t = -0.3 + u * (Math.PI + 0.6); return out.set(Math.cos(t) * R0, Math.sin(t) * R0, 0); };
+  for (let i = 0; i < n; i++) {
+    const px = x + along.x * (i - (n - 1) / 2) * r0 * 1.5, pz = z + along.z * (i - (n - 1) / 2) * r0 * 1.5, c = new Vector3(px, -plateau(px, pz) + 0.3, pz);
+    const R = R0 * (1 - 0.06 * (i % 2)), r = r0 * (0.95 + 0.1 * (i % 2));
+    cols.push({ k: 'arch', c, a, R, r: r * 1.05 });
+    const g = new THREE.TubeGeometry(curve, 40, r, 14, false); g.scale(R / R0, R / R0, 1);
+    g.applyMatrix4(new Matrix4().makeBasis(a, UP, along).setPosition(c)); geos.push(bumpy(g, r * 0.3, 0.7));
+  }
+  addMesh(bake(geos, rockCol), structMat);
+  return makeStruct('arch', cols, {
+    dark: p => { let v = 0; for (const c of cols) { const dx = p.x - c.c.x, dy = p.y - c.c.y, dz = p.z - c.c.z, xx = dx * a.x + dz * a.z, w = -dx * a.z + dz * a.x; if (dy > 0 && Math.hypot(xx, dy) < c.R - c.r && Math.abs(w) < c.r * 1.3) v += 0.2; } return Math.min(0.5, v); },
+    lairs: [{ kind: 'overhang', p: new Vector3(x, -plateau(x, z) + 1.2, z), r: R0 * 0.5, spots: [] }],
+  });
+}
+
+// a thila: a coral pinnacle rising from the sandy floor, stepped with ledges, undercut into overhangs, with caves cut into its sides
+function buildThila(cx, cz, T) {
+  const base = plateau(cx, cz), bot = base + 3, ledges = [T + 5, T + 11.5, T + 18];
+  const caves = [{ th: 0.5, d: T + 13.5, rt: 0.26, rd: 2.6, depth: 4.5 }, { th: 2.8, d: T + 19, rt: 0.22, rd: 2.2, depth: 4 }, { th: 4.4, d: T + 8, rt: 0.2, rd: 1.8, depth: 3.2 }];
+  const angD = (a, b) => { const d = ((a - b + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return d; };
+  const Rb = (d, th) => {
+    const k = smooth(T, base, d), c = Math.cos(th), s = Math.sin(th);
+    let r = 10 + 6 * Math.pow(k, 1.6) + 2.6 * fbm(c * 1.6 + d * 0.05, s * 1.6 - d * 0.04) + 1.1 * vnoise(c * 5 + d * 0.3, s * 5) + 0.5 * vnoise(c * 13 + d * 0.8, s * 13);
+    for (const L of ledges) r += 2.4 * smooth(L - 0.7, L, d) * (1 - smooth(L + 0.3, L + 2.6, d)) * (0.4 + 0.6 * vnoise(c * 2.5 + L, s * 2.5));   // a shelf on top, undercut below
+    return r * Math.pow(clamp((d - T) / 2.5, 0, 1), 0.35);   // a broad, flattish top
+  };
+  const cut = (d, th) => { let v = 0; for (const k of caves) { const a = angD(th, k.th) / k.rt, b = (d - k.d) / k.rd, q = a * a + b * b; if (q < 1) v = Math.max(v, k.depth * Math.pow(1 - q, 0.45)); } return v; };
+  const Rt = (d, th) => Math.max(0, Rb(d, th) - cut(d, th));
+  // mesh: rings every half metre from the top down into the sand
+  const NT = 96, rows = Math.ceil((bot - T) / 0.5), pos = [], idx = [];
+  for (let i = 0; i <= rows; i++) { const d = T + (bot - T) * i / rows; for (let j = 0; j <= NT; j++) { const th = j / NT * Math.PI * 2, r = Rt(d, th); pos.push(cx + Math.cos(th) * r, -d, cz + Math.sin(th) * r); } }
+  for (let i = 0; i < rows; i++) for (let j = 0; j < NT; j++) { const a = i * (NT + 1) + j, b = a + NT + 1; idx.push(a, a + 1, b, a + 1, b + 1, b); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
+  const thilaCol = new Color();
+  addMesh(bake([g], (x, y, z) => {   // every surface crusted with sponges, coralline algae and soft coral bases; darker inside the caves
+    const th = Math.atan2(z - cz, x - cx), cv = cut(-y, th), k = vnoise(x * 0.35 + z * 0.2, y * 0.35);
+    thilaCol.copy(rockColor(x, -y, z));
+    if (k > -0.2) thilaCol.lerp(REEF_COLS[Math.floor(h2(Math.floor(x / 2 + z / 2.5), Math.floor(y / 2)) * REEF_COLS.length)], clamp((k + 0.2) * 1.1, 0, 0.45));
+    return thilaCol.multiplyScalar(1 - 0.55 * clamp(cv / 3, 0, 1));
+  }), structMat);
+  const lairs = [];
+  for (const k of caves) { const r = Rb(k.d, k.th) - k.depth * 0.55, dir = new Vector3(Math.cos(k.th), 0, Math.sin(k.th)), spots = [];
+    for (let i = 0; i < 6; i++) { const th = k.th + (Math.random() - 0.5) * k.rt, d = k.d + k.rd * (0.2 + Math.random() * 0.6), rr = Rt(d, th); spots.push({ p: new Vector3(cx + Math.cos(th) * rr, -d, cz + Math.sin(th) * rr), n: new Vector3(Math.cos(th) * 0.4, 1, Math.sin(th) * 0.4).normalize() }); }
+    lairs.push({ kind: 'cave', p: new Vector3(cx + dir.x * r, -k.d, cz + dir.z * r), r: 1.6, spots }); }
+  for (let i = 0; i < 5; i++) { const th = i * 1.26 + 0.3, L = ledges[i % 3], d = L + 1.8, r = Rt(d, th) + 0.9; lairs.push({ kind: 'overhang', p: new Vector3(cx + Math.cos(th) * r, -d, cz + Math.sin(th) * r), r: 1.5, spots: [{ p: new Vector3(cx + Math.cos(th) * (r + 0.2), -(L + 0.9), cz + Math.sin(th) * (r + 0.2)), n: new Vector3(0, -1, 0) }] }); }
+  return makeStruct('cave', [], {
+    lo: new Vector3(cx - 32, -bot, cz - 32), hi: new Vector3(cx + 32, -T + 1, cz + 32), lairs,
+    push(p, m) {
+      const dx = p.x - cx, dz = p.z - cz, rho = Math.hypot(dx, dz), d = -p.y;
+      if (d < T - m || d > bot) return;
+      const th = Math.atan2(dz, dx), R = Rt(Math.max(d, T), th);
+      if (rho >= R + m) return;
+      const penR = R + m - rho; let penU = Infinity;
+      if (d < T + 2.5) { const Rtop = Rt(T + 2.5, th) || 1; penU = d - (T + 2.5 * Math.pow(rho / Rtop, 1 / 0.35) - m); }
+      if (penU < penR) p.y = -(d - penU); else { const k = (R + m) / (rho || 1e-3); p.x = cx + dx * k; p.z = cz + dz * k; }
+    },
+    dark(p) { const d = -p.y; if (d < T || d > base) return 0; const th = Math.atan2(p.z - cz, p.x - cx), rho = Math.hypot(p.x - cx, p.z - cz), cv = cut(d, th), rb = Rb(d, th); return cv > 0.3 && rho < rb ? 0.88 * clamp((rb - rho) / (cv * 0.6), 0, 1) : 0; },
+    sample(r, x0, d0, z0) {
+      for (let i = 0; i < 3; i++) {
+        const th = r() * Math.PI * 2, d = d0 + r() * CELLY; if (d < T || d > base) continue;
+        const R = Rt(d, th), x = cx + Math.cos(th) * R, z = cz + Math.sin(th) * R; if (x < x0 || x >= x0 + CELL || z < z0 || z >= z0 + CELL) continue;
+        const up = d < T + 2.5 ? 2 * (1 - (d - T) / 2.5) : 0.25;
+        return { p: new Vector3(x, -d, z), n: new Vector3(Math.cos(th), up, Math.sin(th)).normalize(), st: true };
+      }
+      return null;
+    },
+  });
+}
+
+// the Maldives Victory: a ~110 m cargo ship sitting upright on the sand. Local coordinates: x across (port −), y up from the keel, z along (bow +)
+function buildWreck(ox, oy, oz) {
+  const B = 7.5, L0 = -50, L1 = 58, geos = [], cols = [], extras = [], holes = [];
+  const V = (x, y, z) => new Vector3(ox + x, oy + y, oz + z);
+  const hb = z => z < -44 ? B * (0.82 + 0.18 * Math.sqrt(clamp(1 - ((-44 - z) / 6) ** 2, 0, 1))) : z > 36 ? B * Math.max(0, 1 - ((z - 36) / 22) ** 1.8) : B;
+  const keel = z => z > 44 ? 4.5 * Math.pow(smooth(44, 58, z), 1.3) : z < -44 ? 3 * Math.pow((-44 - z) / 6, 1.5) : 0;
+  const rail = z => 9.8 + 2.2 * smooth(38, 58, z);
+  // hull: one thin skin from gunwale to gunwale — flat bottom, rounded bilges, a raked bow — with the gash the reef tore in the port side
+  {
+    const NZ = 108, K = 10, pos = [], idx = [], ring = 2 * K - 1;
+    const half = z => { const b = Math.max(0.05, hb(z)), yb = keel(z), top = rail(z), r = Math.min(1.8, b * 0.9, (top - yb) / 2), P = [[0, yb], [(b - r) / 2, yb], [b - r, yb]];
+      for (let k = 1; k <= 4; k++) { const a = k / 4 * Math.PI / 2; P.push([b - r + Math.sin(a) * r, yb + r - Math.cos(a) * r]); }
+      P.push([b, yb + r + (top - yb - r) / 3], [b, yb + r + (top - yb - r) * 2 / 3], [b, top]); return P; };
+    for (let i = 0; i <= NZ; i++) { const z = L0 + (L1 - L0) * i / NZ, h = half(z); for (let j = 0; j < ring; j++) { const [x, y] = j < K - 1 ? h[K - 1 - j] : h[j - K + 1]; pos.push(ox + (j < K - 1 ? -x : x), oy + y, oz + z); } }
+    for (let i = 0; i < NZ; i++) for (let j = 0; j < ring - 1; j++) {
+      const a = i * ring + j, b = a + ring, zc = L0 + (L1 - L0) * (i + 0.5) / NZ, yc = (pos[a * 3 + 1] + pos[(a + 1) * 3 + 1]) / 2 - oy;
+      if (j < K - 1 && ((zc - 10) / 3.4) ** 2 + ((yc - 3.4) / 2) ** 2 < 1 + 0.5 * (h2(i, j) - 0.5)) continue;   // the breach
+      idx.push(a, b, a + 1, b, b + 1, a + 1);
+    }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); geos.push(g);
+    cols.push(box(0, 0.3, -2, B, 0.3, 44));                                                   // bottom
+    cols.push(box(B - 0.2, 4.9, -6, 0.25, 4.9, 44));                                          // starboard side
+    cols.push(box(-B + 0.2, 4.9, -21.5, 0.25, 4.9, 28.5), box(-B + 0.2, 4.9, 25.5, 0.25, 4.9, 12.5), box(-B + 0.2, 0.8, 10, 0.25, 0.8, 3), box(-B + 0.2, 7.6, 10, 0.25, 2.2, 3));   // port side around the breach
+    const b48 = hb(48);
+    for (const s of [-1, 1]) {   // the bow in two angled pieces per side, following the flare
+      cols.push(box(s * (B + b48) / 2, 5.5, 42, 0.3, 5.5, Math.hypot(B - b48, 12) / 2, Math.atan2(s * (b48 - B), 12)));
+      cols.push(box(s * b48 / 2, 7, 53, 0.3, 4.5, Math.hypot(b48, 10) / 2, Math.atan2(-s * b48, 10)));
+    }
+    cols.push(box(0, 6.4, L0, B * 0.82, 3.4, 0.2));                                          // transom
+  }
+  // everything else is boxes: what you see is what you bump into
+  const solid = [];
+  const S = (x, y, z, hx, hy, hz, yaw = 0) => { const b = box(x, y, z, hx, hy, hz, yaw); cols.push(b); solid.push(b); return b; };
+  const HATCH = [[26, 34], [6, 16], [-16, -6]];
+  for (const s of [-1, 1]) S(s * 5.7, 8.85, -3.5, 1.7, 0.15, 45.5);                                // main deck either side of the hatches
+  for (const [z0, z1] of [[-49, -16], [-6, 6], [16, 26], [34, 42]]) S(0, 8.85, (z0 + z1) / 2, 4, 0.15, (z1 - z0) / 2);
+  for (const [z0, z1] of HATCH) { for (const s of [-1, 1]) { S(s * 4.1, 9.4, (z0 + z1) / 2, 0.12, 0.45, (z1 - z0) / 2 + 0.2); S(0, 9.4, s > 0 ? z1 + 0.1 : z0 - 0.1, 4.2, 0.45, 0.12); } }   // hatch coamings
+  S(0, 10.1, 42, 7.3, 1.1, 0.15);                                                                  // front of the raised forecastle
+  for (const [z0, z1] of [[42, 46], [46, 50], [50, 54], [54, 57]]) S(0, 11.05, (z0 + z1) / 2, Math.max(0.6, hb(z1) - 0.2), 0.15, (z1 - z0) / 2);
+  for (const z of [20, 0]) { for (const s of [-1, 1]) S(s * 4.7, 4.65, z, 2.7, 4.05, 0.15); S(0, 6.65, z, 2, 2.05, 0.15); }   // bulkheads, each with a doorway through
+  S(0, 4.65, -28, 7.3, 4.05, 0.15);
+  S(0, 11.5, -38, 6, 2.5, 8);                                                                      // superstructure
+  S(0, 14.5, -30, 6, 0.5, 0.12); S(0, 16.55, -30, 6, 0.25, 0.12);                                   // bridge front: the windows are long gone
+  for (let x = -6; x <= 6.01; x += 1.5) S(x, 15.5, -30, 0.1, 0.8, 0.12);
+  S(0, 15.4, -46, 6, 1.4, 0.12);
+  for (const s of [-1, 1]) { S(s * 6, 15.4, -42.25, 0.12, 1.4, 3.75); S(s * 6, 15.4, -32.75, 0.12, 1.4, 2.75); S(s * 6, 16.7, -37, 0.12, 0.1, 1.5); S(s * 7.25, 13.95, -31.5, 1.25, 0.1, 1.5); }   // side walls with doors, bridge wings
+  S(0, 16.95, -38, 6.4, 0.15, 8.4);                                                                // bridge roof
+  S(0, 3.8, -51.4, 0.2, 2.6, 1.3);                                                                 // rudder
+  const crates = [[2.5, 1.5, 33, 1.2, 0.9, 1.4, 0.3], [-3, 1.3, 29, 1, 0.7, 1.8, -0.2], [0.5, 1.2, 11, 1.5, 0.6, 1, 0.8], [-4, 1.6, 14, 1, 1, 1, 0.1], [3.5, 1.1, -10, 1.8, 0.5, 0.9, 1.2], [-2, 1.4, -19, 1.1, 0.8, 1.1, 0.5], [-1, 3, -19, 0.8, 0.6, 0.8, 0.9]];
+  for (const c of crates) S(...c);                                                                 // cargo still lying in the holds
+  for (const b of solid) { const g = new THREE.BoxGeometry(b.h.x * 2, b.h.y * 2, b.h.z * 2); g.rotateY(b.yaw); g.translate(ox + b.c.x, oy + b.c.y, oz + b.c.z); geos.push(g); }
+  const cyl = (x, y, z, r0, r1, len, rx = 0, rz = 0, seg = 12) => { const g = new THREE.CylinderGeometry(r1, r0, len, seg); g.translate(0, len / 2, 0); g.rotateX(rx); g.rotateZ(rz); g.translate(ox + x, oy + y, oz + z); return g; };
+  geos.push(cyl(0, 17.1, -41, 1.6, 1.4, 4.6, 0, 0, 20));                                            // funnel
+  cols.push(box(0, 19.4, -41, 1.5, 2.3, 1.5));
+  for (const zm of [38, 21]) {   // masts with crosstrees, cargo derricks and their rigging
+    geos.push(cyl(0, 9, zm, 0.34, 0.24, 13)); cols.push(box(0, 15.5, zm, 0.35, 6.5, 0.35));
+    const ct = new THREE.BoxGeometry(5.2, 0.25, 0.3); ct.translate(ox, oy + 18.6, oz + zm); geos.push(ct);
+    for (const s of [-1, 1]) { geos.push(cyl(0, 10.2, zm, 0.2, 0.14, 9.5, s * 1.05, 0)); for (const sx of [-1, 1]) { const a = new Vector3(0, 21.5, zm), b = new Vector3(sx * 7.1, 9.8, zm + s * 3), d = b.clone().sub(a); const g = new THREE.CylinderGeometry(0.035, 0.035, d.length(), 4); g.translate(0, d.length() / 2, 0); g.applyQuaternion(_q.setFromUnitVectors(UP, d.normalize())); g.translate(ox + a.x, oy + a.y, oz + a.z); geos.push(g); } }
+  }
+  geos.push(cyl(0, 17.1, -34, 0.12, 0.1, 4));                                                       // radar mast on the bridge roof
+  { const hub = new THREE.SphereGeometry(0.5, 12, 8); hub.translate(ox, oy + 3.4, oz - 50.3); geos.push(hub);   // propeller
+    for (let k = 0; k < 4; k++) { const g = new THREE.BoxGeometry(0.7, 1.5, 0.1); g.translate(0, 1.05, 0); g.rotateY(0.35); g.rotateZ(k * Math.PI / 2 + 0.4); g.translate(ox, oy + 3.4, oz - 50.3); geos.push(g); } }
+  for (let i = 0; i < 38; i++) {   // the anchor chain runs from the hawse pipe down to the sand
+    const u = i / 37, x = -3.2 - 1.2 * u, z = 54.5 + 12 * u, y = 1 + 9.6 * Math.pow(1 - u, 1.7);
+    const g = new THREE.TorusGeometry(0.24, 0.07, 5, 10); g.rotateY(Math.PI / 2); if (i % 2) g.rotateZ(Math.PI / 2); g.rotateX(Math.atan2(9.6 * 1.7 * Math.pow(1 - u, 0.7) / 12, 1)); g.translate(ox + x, oy + y, oz + z); geos.push(g);   // alternate links turn 90°
+  }
+  for (let z = -44; z <= -32; z += 3) for (const s of [-1, 1]) { const g = new THREE.CylinderGeometry(0.22, 0.22, 0.12, 10); g.rotateZ(Math.PI / 2); g.translate(ox + s * (B + 0.02), oy + 8, oz + z); holes.push(g); }   // portholes
+  for (let z = -44; z <= -32; z += 2.4) for (const s of [-1, 1]) for (const y of [10.8, 12.6]) { const g = new THREE.CylinderGeometry(0.2, 0.2, 0.12, 10); g.rotateZ(Math.PI / 2); g.translate(ox + s * 6.03, oy + y, oz + z); holes.push(g); }
+  const paint = new Color(), rust = new Color('#6e4a30');
+  addMesh(bake(geos, (x, y, z) => {   // faded antifouling red below, black topsides, once-white superstructure; rust, then coralline algae, sponges and turf
+    const ly = y - oy; paint.set(ly < 5.5 ? '#5a2e24' : ly > 12 ? '#8a8272' : '#4e4a44');
+    paint.lerp(rust, 0.3 + 0.3 * vnoise(x * 0.4 + z * 0.1, y * 0.4));
+    const k = fbm(x * 0.35 + 40, z * 0.35 + y * 0.5);
+    if (k > 0.02) paint.lerp(REEF_COLS[Math.floor(h2(Math.floor(x / 2.5 + z / 3), Math.floor(y / 2.5)) * REEF_COLS.length)], clamp((k - 0.02) * 2.2, 0, 0.7));
+    return paint.multiplyScalar(0.8 + 0.3 * vnoise(x * 1.3, z * 1.3 + y));
+  }), wreckMat);
+  addMesh(bake(holes, () => paint.set('#ffffff')), holeMat);
+  // surfaces corals settle on (weights favour the masts, where sea fans and soft corals crowd in the current)
+  const surf = [], R = (o, a, b, n, w = 1) => surf.push({ o: V(...o), a: new Vector3(...a), b: new Vector3(...b), n: new Vector3(...n).normalize(), w: w * new Vector3(...a).length() * new Vector3(...b).length() });
+  for (const s of [-1, 1]) { R([s * (B + 0.05), 1.5, -44], [0, 0, 80], [0, 8, 0], [s, 0, 0]); R([s * 4.2, 9.02, -48], [s * 3, 0, 0], [0, 0, 89], [0, 1, 0]); }
+  for (const [z0, z1] of [[-29, -16], [-6, 6], [16, 26], [34, 42], [42, 50]]) R([-4, z0 >= 42 ? 11.22 : 9.02, z0], [8, 0, 0], [0, 0, z1 - z0], [0, 1, 0]);
+  R([-6.3, 17.12, -46.3], [12.6, 0, 0], [0, 0, 16.6], [0, 1, 0]);
+  for (const zm of [38, 21]) for (const s of [-1, 1]) R([s * 0.36, 10, zm - 0.3], [0, 0, 0.6], [0, 11, 0], [s, 0, 0], 40);
+  R([-6.5, 0.62, -27], [13, 0, 0], [0, 0, 68], [0, 1, 0], 0.25);
+  const totalW = surf.reduce((a, s) => a + s.w, 0);
+  const hold = { lo: V(-7.2, 0.6, -28), hi: V(7.2, 8.7, 42) }, bridge = { lo: V(-6, 14, -46), hi: V(6, 16.8, -30) };
+  const inBox = (p, b) => p.x > b.lo.x && p.x < b.hi.x && p.y > b.lo.y && p.y < b.hi.y && p.z > b.lo.z && p.z < b.hi.z;
+  const holdSpots = z => Array.from({ length: 5 }, (_, i) => ({ p: V(-5 + i * 2.5, 0.62, z + (i % 2 ? 2 : -2)), n: new Vector3(0, 1, 0) }));
+  for (const c of cols) c.c.add(_v.set(ox, oy, oz));   // colliders were laid out in ship coordinates
+  return makeStruct('wreck', cols, {
+    dark(p) {
+      if (inBox(p, hold)) { const lz = p.z - oz, lx = Math.abs(p.x - ox), open = lx < 4 && HATCH.some(([a, b]) => lz > a && lz < b) ? smooth(3, 8, p.y - oy) : 0; return 0.85 - 0.45 * open; }
+      return inBox(p, bridge) ? 0.5 : 0;
+    },
+    sample(r, x0, d0, z0) {
+      for (let i = 0; i < 4; i++) {
+        let q = r() * totalW, s = surf[0]; for (const t of surf) { if ((q -= t.w) <= 0) { s = t; break; } }
+        const p = s.o.clone().addScaledVector(s.a, r()).addScaledVector(s.b, r());
+        if (p.x >= x0 && p.x < x0 + CELL && p.z >= z0 && p.z < z0 + CELL && -p.y >= d0 && -p.y < d0 + CELLY) return { p: p.addScaledVector(s.n, 0.02), n: s.n.clone(), st: true };
+      }
+      return null;
+    },
+    lairs: [{ kind: 'wreck', p: V(0, 3.5, 31), r: 5, spots: holdSpots(31) }, { kind: 'wreck', p: V(0, 3.5, 10), r: 5, spots: holdSpots(10) }, { kind: 'wreck', p: V(0, 3.5, -14), r: 5, spots: holdSpots(-14) },
+      { kind: 'wreck', p: V(0, 15.3, -40), r: 3, spots: [] }, { kind: 'overhang', p: V(0, 1.6, -52), r: 2, spots: [] }],
+  });
+}
+
+// set up the terrain and structures for a dive site; returns where the diver starts
+function buildSite(s) {
+  for (const m of structMeshes) { scene.remove(m); m.geometry.dispose(); } structMeshes = []; structs.length = 0; carves.length = 0;
+  for (const m of tiles.values()) { scene.remove(m); m.geometry.dispose(); } tiles.clear();   // the terrain may be shaped differently here
+  const L = s.layout, R = rng(hash(s.id) + 99);
+  TER = L === 'thila' ? { top: 19, slope: 0.45, max: 12, sand: 1 } : L === 'wreck' ? { top: 6, slope: 0.5, max: 28, sand: 1 } : { top: 3, slope: 0.09, max: 14, sand: 0 };
+  let start = null;
+  if (L === 'wreck') {
+    let e = 1e9; for (let z = -70; z <= 80; z += 5) e = Math.min(e, edgeX(z));
+    const ox = e - 70, oz = 0; TER.flat = { x: ox, z: oz + 4, rx: 22, rz: 75 };
+    buildWreck(ox, -(plateau(ox, oz) + 1), oz);
+    buildArches(ox + 26, 72, 1, 0, 1, 4.2, 1.3);
+    start = { p: new Vector3(ox + 13, -(plateau(ox, oz) - 20), oz + 30), yaw: Math.PI, pitch: -0.2 };
+  } else if (L === 'thila') {
+    const cx = edgeX(0) - 55, cz = 0;
+    buildThila(cx, cz, 7);
+    buildArches(cx + 30, cz + 14, 0, 1, 3, 4, 1.3);
+    start = { p: new Vector3(cx + 17, -8, cz + 4), yaw: Math.PI - 0.2, pitch: -0.25 };
+  }
+  const caveAt = L === 'caves' ? [[-45, 13], [22, 18], [68, 24], [-110, 16]] : [];
+  if (L !== 'thila') {   // ledges jut from the wall here and there (every few metres at Banana Reef, with caves cut in between)
+    for (let z = -260; z < 260; z += (L === 'caves' ? 16 : 45) + R() * 22) {
+      const d = Math.max(topDepth(z) + 3.5, 6) + R() * 26; if (caveAt.some(([cz]) => Math.abs(z - cz) < 10)) continue;
+      buildLedge(wallRaw(d, z) + 0.3, -d, z, 2.3 + R() * 1.5, 0.75 + R() * 0.5, 2.6 + R() * 3, R);
+    }
+  }
+  for (const [z, d] of caveAt) buildWallCave(z, Math.max(d, topDepth(z) + 5), 4 + R() * 1.5, 2.4 + R() * 0.6, 4.5 + R() * 1.5, R);
+  return start;
+}
 
 // ---------- surface, sun shafts, particles ----------
 // Seen from below, the surface shows the sky only inside Snell's window (a ~97° cone overhead); outside it mirrors the deep water.
@@ -1136,6 +1457,8 @@ const known = sp => !settings.hideNames || !!progress.discovered[sp.id];   // re
 const label = sp => known(sp) ? sp.name : `Unknown ${kindName(sp)}`;
 const an = w => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w, cap = w => w[0].toUpperCase() + w.slice(1);
 const diveOpts = { night: false };
+let shelterK = 0, torchNow = 0, lastArch = false, visited = new Set();   // how enclosed the camera is (caves and wrecks are dark inside)
+const strobeOn = () => ambient(-diver.p.y) * (1 - shelterK * 0.9) < 0.75;
 let diveStats = { start: 0, maxDepth: 0 };
 
 function startDive(s) {
@@ -1144,7 +1467,9 @@ CAUST.uCaust.value = diveOpts.night ? 0 : 0.9; diveStats = { start: t, maxDepth:
   pool = species.filter(sp => !sp.host && !sp.lair);   // lair species only live at cleaning stations, in caves and on wrecks
   hosts = species.filter(sp => sp.host);
   cells = new Map(); summoned = [];
-  diver.p.set(edgeX(0) + 7, -6, 0); diver.v.set(0, 0, 0); diver.yaw = Math.PI; diver.pitch = -0.15;
+  const st = buildSite(s);
+  if (st) { diver.p.copy(st.p); diver.yaw = st.yaw; diver.pitch = st.pitch; } else { diver.p.set(edgeX(0) + 7, -6, 0); diver.yaw = Math.PI; diver.pitch = -0.15; }
+  diver.v.set(0, 0, 0); shelterK = 0; lastArch = false; visited = new Set();
   $('site-name').textContent = `${s.name} · ${s.area}${diveOpts.night ? ' · 🌙 night' : ''}`;
   $('picker').hidden = true; $('land').hidden = true; $('hud').hidden = false; closeCard();
   updateTiles(true); updateTarget(); applyTouch(); updateGear(6, true);
@@ -1186,6 +1511,7 @@ function makeCreature(sp, p, extra) {
 const CELL = 30, CELLY = 15, R_H = 66, R_V = 34;
 const K_PEL = 0.3, K_REEF = 1, K_CORAL = 6; // ponytail: density knobs — tune here if a zone feels empty/crowded
 function findSurface(r, x0, d0, z0) {
+  for (const st of structs) if (st.sample && st.hi.x > x0 && st.lo.x < x0 + CELL && st.hi.z > z0 && st.lo.z < z0 + CELL && -st.lo.y > d0 && -st.hi.y < d0 + CELLY && r() < 0.75) { const s = st.sample(r, x0, d0, z0); if (s) return s; }
   for (let i = 0; i < 8; i++) {
     const x = x0 + r() * CELL, z = z0 + r() * CELL, e = edgeX(z);
     if (x < e) { const pd = plateau(x, z); if (pd >= d0 && pd < d0 + CELLY) return { p: new Vector3(x, -pd, z), n: new Vector3(0, 1, 0) }; }
@@ -1210,7 +1536,8 @@ function makeCell(i, j, k) {
       if (sp.hab !== 'benthic') { pushOut(p, 0.5); if (-p.y < sp.depth[0]) p.y = -Math.max(0.5, sp.depth[0]); }
       else if (s.n.x > 0) p.x -= 0.05;
       const lead = makeCreature(sp, p, diveOpts.night ? nightTraits(sp) : undefined);
-      if (s && sp.hab === 'benthic' && s.n.x > 0 && lead.fixed) { lead.yaw = 0; lead.q.setFromEuler(_e.set(0, 0, 0, 'YZX')); }
+      if (s?.st && lead.fixed) alignTo(lead, s.n, r);   // growing out of a wreck's hull or a thila's side
+      else if (s && sp.hab === 'benthic' && s.n.x > 0 && lead.fixed) { lead.yaw = 0; lead.q.setFromEuler(_e.set(0, 0, 0, 'YZX')); }
       list.push(lead);
       if (sp.type === 'anemone' && hosts.length) {
         const ok = hosts.filter(h => -p.y >= h.depth[0] && -p.y <= h.depth[1]); if (!ok.length) continue;
@@ -1221,12 +1548,14 @@ function makeCell(i, j, k) {
         const cnt = sp.school[0] + Math.floor(r() * (sp.school[1] - sp.school[0] + 1)) - 1, spread = Math.max(0.6, sp.size * 4);
         for (let q = 0; q < cnt; q++) {
           const off = new Vector3((r() - 0.5) * spread * 2, (r() - 0.5) * spread, (r() - 0.5) * spread * 2);
-          if (sp.hab === 'benthic') { const pp = p.clone().add(s.n.x > 0 ? off.set(0, off.y, off.z) : off.set(off.x, 0, off.z)); if (s.n.y > 0) pp.y = -plateau(pp.x, pp.z); list.push(makeCreature(sp, pp)); }
+          if (sp.hab === 'benthic' && s.st) { const c = makeCreature(sp, p.clone().add(off.addScaledVector(s.n, -off.dot(s.n)).multiplyScalar(0.4))); alignTo(c, s.n, r); list.push(c); }
+          else if (sp.hab === 'benthic') { const pp = p.clone().add(s.n.x > 0 ? off.set(0, off.y, off.z) : off.set(off.x, 0, off.z)); if (s.n.y > 0) pp.y = -plateau(pp.x, pp.z); list.push(makeCreature(sp, pp)); }
           else list.push(makeCreature(sp, p.clone().add(off), { leader: lead, off }));
         }
       }
     }
   }
+  for (const st of structs) for (const L of st.lairs) if (Math.floor(L.p.x / CELL) === i && Math.floor(-L.p.y / CELLY) === j && Math.floor(L.p.z / CELL) === k) spawnLair(L, r, list);
   if (reef && mid < 35 && !diveOpts.night && r() < 0.22) {   // a cleaning station: a few cleaner wrasse holding court over one spot on the reef
     const s = findSurface(r, x0, d0, z0);
     if (s) {
@@ -1235,6 +1564,28 @@ function makeCell(i, j, k) {
     }
   }
   return list;
+}
+// who shelters where: species with a matching `lair` live only there; these guests also turn up (by day whitetips and nurse sharks rest in caves)
+const LAIR_GUESTS = { cave: { whitetip_reef: 0.7, tawny_nurse: 0.25, giant_moray: 0.5, cup_coral: 3, lionfish_volitans: 0.3 }, wreck: { giant_moray: 0.5, lionfish_miles: 0.6, cup_coral: 2, tube_sponge: 1 }, overhang: { lionfish_volitans: 0.3, cup_coral: 2, giant_moray: 0.2 } };
+function spawnLair(L, r, list) {
+  const d = -L.p.y, fits = sp => d >= sp.depth[0] - 2 && d <= sp.depth[1] + 2;
+  const cand = species.filter(sp => sp.lair?.includes(L.kind) && fits(sp)).map(sp => [sp, sp.ab * (site.featured[sp.id] ? 1.5 : 1)]);
+  for (const [id, n] of Object.entries(LAIR_GUESTS[L.kind])) if (SP[id] && fits(SP[id])) cand.push([SP[id], n * (site.featured[id] ? 1.5 : 1)]);
+  for (const [sp, exp] of cand) {
+    const n = Math.floor(exp) + (r() < exp % 1 ? 1 : 0);
+    for (let m = 0; m < n; m++) {
+      if (sp.hab === 'benthic') {   // morays, cup corals and sponges need a spot on the rock or the hull
+        if (!L.spots.length) continue; const s = L.spots[(r() * L.spots.length) | 0], c = makeCreature(sp, s.p.clone().add(_v.set((r() - 0.5) * 0.6, 0, (r() - 0.5) * 0.6)));
+        alignTo(c, s.n, r); list.push(c); continue;
+      }
+      const p = L.p.clone().add(_v.set((r() - 0.5) * L.r, (r() - 0.5) * L.r * 0.5, (r() - 0.5) * L.r)); pushOut(p, 0.3 + sp.size * 0.3);
+      const resting = sp.type === 'shark' && !diveOpts.night, lead = makeCreature(sp, p, { rest: resting || undefined, ...(diveOpts.night ? nightTraits(sp) : {}) });
+      if (resting) lead.home.copy(p); list.push(lead);
+      if (sp.school) for (let q = 0, cnt = sp.school[0] + Math.floor(r() * (sp.school[1] - sp.school[0] + 1)) - 1, spread = Math.max(0.5, sp.size * 3); q < cnt; q++) {
+        const off = new Vector3((r() - 0.5) * spread * 2, (r() - 0.5) * spread, (r() - 0.5) * spread * 2); list.push(makeCreature(sp, p.clone().add(off), { leader: lead, off }));
+      }
+    }
+  }
 }
 function updateCells() {
   const px = diver.p.x, pz = diver.p.z, d = -diver.p.y;
@@ -1428,7 +1779,7 @@ function stepDiver(dt) {
   _des.set(0, 0, 0).addScaledVector(f, fw).addScaledVector(r, st).add(_v.set(0, vt, 0));
   if (_des.lengthSq() > 0) _des.setLength(max);
   diver.v.lerp(_des, Math.min(1, dt * (turbo ? 3 : 2.2)));
-  diver.p.addScaledVector(diver.v, dt).addScaledVector(currentAt(diver.p), dt);
+  diver.p.addScaledVector(diver.v, dt).addScaledVector(currentAt(diver.p), dt * (1 - darkAt(diver.p)));   // no current inside caves and wrecks
   pushOut(diver.p, gear().margin);
   diver.kick += dt * (1.5 + diver.v.length() * (turbo ? 0.3 : 2.5));
   const prevBreath = diver.breath;
@@ -1490,20 +1841,26 @@ function frame(now, manual) {
   // light & water
   const camD = -camera.position.y, water = diveOpts.night ? mix(stops(WATER, camD), '#00040a', 0.88) : stops(WATER, camD);
   scene.background.set(water); scene.fog.color.set(water); scene.fog.density = 0.02 + 0.016 * (1 - ambient(camD));
-  hemi.color.set(mix('#ffffff', water, 0.3)); hemi.groundColor.set(mix(water, '#000000', 0.6)); hemi.intensity = 0.04 + 1.0 * amb; scene.environmentIntensity = 0.02 + 0.9 * amb;
-  sun.color.set(mix('#fff2dc', '#6fcbe6', clamp(depth / 40, 0, 1))); sun.intensity = 2.6 * amb;
+  shelterK = lerp(shelterK, darkAt(camera.position), Math.min(1, dt * 2.5)); const open = 1 - shelterK * 0.88;   // inside a cave or a wreck the daylight fades
+  hemi.color.set(mix('#ffffff', water, 0.3)); hemi.groundColor.set(mix(water, '#000000', 0.6)); hemi.intensity = (0.04 + 1.0 * amb) * open; scene.environmentIntensity = (0.02 + 0.9 * amb) * open;
+  sun.color.set(mix('#fff2dc', '#6fcbe6', clamp(depth / 40, 0, 1))); sun.intensity = 2.6 * amb * (1 - shelterK * 0.7);
   sun.position.copy(diver.p).add(_v.set(20, 60, 10)); sun.target.position.copy(diver.p);
   const shadowsOn = settings.shadows && !diveOpts.night && depth < 45;   // only where sunlight is strong enough to cast them
   sun.castShadow = settings.shadows; renderer.shadowMap.autoUpdate = shadowsOn; sun.shadow.intensity = shadowsOn ? 0.75 : 0;
   if (bloom) { const k = diveOpts.night ? 1 : clamp(depth / 300, 0, 1); bloom.strength = lerp(0.2, 1.1, k); bloom.threshold = lerp(1.1, 0.8, k); }   // only glow-bright things bloom in the sunlit shallows
-  const torchK = clamp((dark - 0.35) / 0.4, 0, 1);
+  const torchK = torchNow = Math.max(clamp((dark - 0.35) / 0.4, 0, 1), clamp((shelterK - 0.12) / 0.3, 0, 1));
+  { const k = darkAt(diver.p) > 0.25 || darkAt.kind === 'arch' ? darkAt.kind : null;   // say something the first time you enter each kind of place
+    if (k === 'arch' && !lastArch) toast('🕳️ You swam through a rock arch');
+    lastArch = k === 'arch';
+    if (k && !visited.has(k) && k !== 'arch' && k !== 'overhang') { visited.add(k); toast(k === 'wreck' ? '🔦 Inside the wreck — your torch comes on. Sweepers and soldierfish shelter in the dark holds.' : '🔦 Inside a cave — your torch comes on. Look for resting sharks, soldierfish and sweepers.'); }
+  }
   torch.intensity = torchK * 45 * G.lamp; torch.distance = 55 * Math.sqrt(G.lamp); torch.position.copy(diver.p).addScaledVector(f, 0.8 + G.cam[0] * 0.25); torch.target.position.copy(diver.p).addScaledVector(f, 20);
   diverLamp.intensity = torchK * 4 * (1 + G.cam[0] * 0.12); diverLamp.distance = 8 + G.cam[0] * 2;   // bigger craft need a bigger fill light to be seen
   diverModel.animate(diver.kick, t, torchK); diverLamp.position.copy(camera.position); if (VIEW.on) diverModel.beam.material.opacity = 0;
   surface.position.set(diver.p.x, 0, diver.p.z); surface.visible = camD < 150;
   surfU.uTime.value = t; surfU.uNight.value = diveOpts.night ? 1 : 0; surfU.uFogD.value = scene.fog.density; surfU.uWater.value.set(water);
   shafts.forEach(s => { s.visible = depth < 90 && !diveOpts.night; s.position.set(Math.floor(diver.p.x / 90) * 90 + s.userData.o[0] - 45, 0, Math.floor(diver.p.z / 90) * 90 + s.userData.o[1] - 45); });
-  shaftMat.opacity = 0.07 * clamp(1 - depth / 80, 0, 1);
+  shaftMat.opacity = 0.07 * clamp(1 - depth / 80, 0, 1) * (1 - shelterK);
   floor.visible = depth > FLOOR - 400; floor.position.set(Math.round(diver.p.x / 50) * 50, -FLOOR, Math.round(diver.p.z / 50) * 50);
 
   // write instances (two passes: count, grow buffers, then fill)
@@ -1585,11 +1942,11 @@ function frame(now, manual) {
   frameMs = lerp(frameMs, performance.now() - f0, 0.05);
   if ((hudT -= dt) < 0) { hudT = 0.1; updateHud(); }
   if (camMode && (camT -= dt) < 0) {
-    camT = 0.15; framing = analyzeFrame(ambient(depth) < 0.75); const b = framing.best;
+    camT = 0.15; framing = analyzeFrame(strobeOn()); const b = framing.best;
     $('vf-focus').className = b ? (framing.stars >= 3 ? 'good' : 'ok') : '';
     $('vf-subject').textContent = b ? `Subject · ${b.dist.toFixed(1)} m · ${'★'.repeat(framing.stars)}${'☆'.repeat(3 - framing.stars)}` : 'No subject';
     $('vf-tip').textContent = framing.tips[0] || 'Looks great — shoot!';
-    $('vf-strobe').textContent = ambient(depth) < 0.75 ? 'Strobe AUTO' : 'Natural light';
+    $('vf-strobe').textContent = strobeOn() ? 'Strobe AUTO' : 'Natural light';
   }
   if (!camMode && (pickT -= dt) < 0) { pickT = 0.12; aimed = pick(); const lab = $('aim'); if (aimed) { lab.textContent = `${label(aimed.sp)} · ${aimed.p.distanceTo(diver.p).toFixed(0)} m`; lab.hidden = false; } else lab.hidden = true; }
 }
@@ -1600,7 +1957,7 @@ let mouseNDC = null;
 function pick() {
   ray.setFromCamera(mouseNDC || { x: 0, y: 0 }, camera);
   ray.far = 60;
-  const hit = ray.intersectObjects([...tiles.values()], false)[0], maxD = hit ? hit.distance : 60;
+  const hit = ray.intersectObjects([...tiles.values(), ...structMeshes], false)[0], maxD = hit ? hit.distance : 60;
   const o = ray.ray.origin, dir = ray.ray.direction;
   let best = null, bestScore = 1;
   for (const c of live) {
@@ -1643,6 +2000,7 @@ function behaviour(sp) {
   if (sp.mood === 'hide') b.push('Hides in its burrow when you get close');
   if (!b.length) b.push(sp.hab === 'benthic' ? 'Lives fixed to the reef or seabed' : ['shark', 'whale', 'ray', 'turtle'].includes(sp.type) ? 'Calm — keeps a little distance' : 'Shy — flees if you rush at it');
   if (sp.lair?.includes('station')) b.push('Runs a cleaning station for bigger animals');
+  if (sp.lair?.some(l => l !== 'station')) b.push('Shelters in caves, under overhangs and in wrecks');
   if (airOf(sp)) b.push('Breathes air — comes up to the surface every few minutes');
   if (['octopus', 'cuttle', 'squid'].includes(sp.type)) b.push('Flashes colours when startled');
   if (sp.type === 'shark' && sp.hab === 'reef' && !sp.f?.nurse && !sp.f?.zebra) b.push('Patrols the reef edge');
@@ -1769,19 +2127,19 @@ function updateShotCount() { $('vf-count').textContent = `${photos.length} photo
 // Who is in the frame, how big, how centred, how well lit — this is also what grades the photo.
 function analyzeFrame(withStrobe) {
   const tanH = Math.tan(camera.fov * Math.PI / 360), cam = camera.position, fogD = scene.fog.density, out = [];
-  const torchK = clamp((1 - ambient(-diver.p.y) - 0.35) / 0.4, 0, 1);
+  const torchK = torchNow;
   for (const c of live) {
     const dist = c.p.distanceTo(cam); if (dist > 45 || dist < 0.15) continue;
     _v.copy(c.p).project(camera); if (_v.z > 1 || Math.abs(_v.x) > 1 || Math.abs(_v.y) > 1) continue;
     const frac = c.size * 0.5 / (dist * tanH); if (frac < 0.02) continue;
-    const light = Math.max(ambient(-c.p.y), withStrobe ? clamp(1.1 - dist / 9, 0, 1) : 0, torchK * clamp(1 - dist / 22, 0, 0.8), c.sp.glow ? 0.45 : 0) * Math.exp(-((fogD * dist) ** 2));
+    const light = Math.max(ambient(-c.p.y) * (1 - 0.9 * darkAt(c.p)), withStrobe ? clamp(1.1 - dist / 9, 0, 1) : 0, torchK * clamp(1 - dist / 22, 0, 0.8), c.sp.glow ? 0.45 : 0) * Math.exp(-((fogD * dist) ** 2));
     out.push({ c, dist, frac, center: Math.hypot(_v.x, _v.y * camera.aspect), light, score: Math.min(frac, 0.45) * (1.25 - Math.min(1, Math.hypot(_v.x, _v.y))) * (0.2 + light) });
   }
   out.sort((a, b) => b.score - a.score);
   let best = null;
   for (const o of out.slice(0, 5)) {   // the subject must not be hidden behind rock
     ray.set(cam, _v2.subVectors(o.c.p, cam).normalize()); ray.far = o.dist;
-    if (!ray.intersectObjects([...tiles.values()], false).length) { best = o; break; }
+    if (!ray.intersectObjects([...tiles.values(), ...structMeshes], false).length) { best = o; break; }
   }
   const blur = diver.v.length() > 1.3 || (best && best.c.v.length() > 1.5 * Math.max(1, best.c.size * 2) && !camMode) || (best && best.c.v.length() * zoom > 3);
   let stars = 0; const tips = [];
@@ -1792,7 +2150,7 @@ function analyzeFrame(withStrobe) {
     if (best.frac < 0.12) tips.push(zoom < 4 ? 'Get closer or zoom in' : 'Get closer');
     else if (best.frac < 0.18) tips.push('Fill more of the frame');
     if (best.center >= 0.5) tips.push('Centre your subject');
-    if (!lit) tips.push(ambient(-best.c.p.y) < 0.3 ? 'Too dark — get within a few metres so the strobe reaches' : 'Subject is lost in the haze — get closer');
+    if (!lit) tips.push(ambient(-best.c.p.y) * (1 - darkAt(best.c.p)) < 0.3 ? 'Too dark — get within a few metres so the strobe reaches' : 'Subject is lost in the haze — get closer');
     if (blur) tips.push('Motion blur — hold still while you shoot');
   } else tips.push('No animal in frame');
   const others = [...new Set(out.filter(o => o !== best && o.frac > 0.03 && o.light > 0.15).map(o => o.c.sp.id))].filter(id => id !== best?.c.sp.id);
@@ -1864,7 +2222,7 @@ const shutterSound = () => audio.shutter();
 
 async function shoot() {
   if (t - lastShot < 0.6) return; lastShot = t;
-  const useStrobe = ambient(-diver.p.y) < 0.75;   // auto strobe: on everywhere but the bright shallows
+  const useStrobe = strobeOn();   // auto strobe: on everywhere but the bright shallows (and always in caves and wrecks)
   if (useStrobe) { strobe.position.copy(camera.position).addScaledVector(forward(), 0.3); strobe.intensity = 160; }
   const shot = analyzeFrame(useStrobe);
   renderFrame();
@@ -1881,8 +2239,8 @@ async function shoot() {
   const photo = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, time: Date.now(), dive: diveId, site: site.name, area: site.area, depth: Math.round(-diver.p.y),
     img: cv.toDataURL('image/jpeg', 0.85), stars: shot.stars, tips: shot.tips, strobe: useStrobe, zoom: +zoom.toFixed(1),
     subject: b ? { id: b.c.sp.id, kind: kindName(b.c.sp), dist: +b.dist.toFixed(1), depth: Math.round(-b.c.p.y), count: shot.same,
-      note: b.c.cleaning ? 'cleaner wrasse were picking it clean' : b.c.st ? 'it was working at its cleaning station' : b.c.surf ? 'it was taking a breath at the surface' : b.c.flash > 0.3 ? 'it was flashing colours' : b.c.circling ? 'it was circling you' : b.c.puff > 0.6 ? 'it had puffed itself up' : b.c.hide > 0.5 ? 'it was pulling back into its burrow' : b.c.prey ? 'it was chasing another fish' : b.c.sleep ? 'it was asleep in a bubble of mucus' : b.c.inspect ? 'it swam over to look at you' : b.c.fixed ? '' : b.c.flee > t ? 'it darted away from you' : '' } : null,
-    others: shot.others, researched: false, night: diveOpts.night };
+      note: b.c.cleaning ? 'cleaner wrasse were picking it clean' : b.c.st ? 'it was working at its cleaning station' : b.c.surf ? 'it was taking a breath at the surface' : b.c.flash > 0.3 ? 'it was flashing colours' : b.c.circling ? 'it was circling you' : b.c.rest && b.c.sp.type === 'shark' ? 'it was resting on the bottom' : b.c.puff > 0.6 ? 'it had puffed itself up' : b.c.hide > 0.5 ? 'it was pulling back into its burrow' : b.c.prey ? 'it was chasing another fish' : b.c.sleep ? 'it was asleep in a bubble of mucus' : b.c.inspect ? 'it swam over to look at you' : b.c.fixed ? '' : b.c.flee > t ? 'it darted away from you' : '' } : null,
+    others: shot.others, researched: false, night: diveOpts.night, inside: darkAt(diver.p) > 0.3 ? darkAt.kind : null };
   photos.push(photo); updateShotCount(); photoDB.put(photo);
   const st = '★'.repeat(shot.stars) + '☆'.repeat(3 - shot.stars);
   toast(b ? `📷 ${st} ${known(b.c.sp) && progress.discovered[b.c.sp.id] ? b.c.sp.name : `Unidentified ${photo.subject.kind}`} at ${photo.depth} m${shot.tips.length ? ' — ' + shot.tips[0] : ''}` : `📷 ${shot.tips[0]}`);
@@ -2158,6 +2516,10 @@ const GOALS = [
   { id: 'clean', icon: '🧽', name: 'Cleaning station', desc: 'Photograph an animal holding still while cleaner wrasse pick it clean', test: (p, c) => !!c?.cleaning || !!c?.st?.client?.cleaning },
   { id: 'breath', icon: '🫧', name: 'Coming up for air', desc: 'Photograph a turtle, sea snake or dolphin taking a breath at the surface', test: (p, c) => !!c?.surf },
   { id: 'flash', icon: '🐙', name: 'Colour show', desc: 'Photograph an octopus, cuttlefish or squid flashing colours', test: (p, c) => c?.flash > 0.3 },
+  { id: 'wreck', icon: '🚢', name: 'Wreck diver', desc: 'Photograph an animal from inside the holds or bridge of the Maldives Victory', test: p => !!p.subject && p.inside === 'wreck' },
+  { id: 'cave', icon: '🔦', name: 'Into the dark', desc: 'Photograph an animal from inside a cave (Banana Reef and Maaya Thila have them)', test: p => !!p.subject && p.inside === 'cave' },
+  { id: 'swarm', icon: '✨', name: 'Golden swarm', desc: '10 or more pygmy sweepers in one frame', test: p => p.subject?.id === 'glassfish' && p.subject.count >= 10 },
+  { id: 'resting', icon: '😴', name: 'Resting shark', desc: 'Photograph a whitetip reef shark resting in a cave by day', test: (p, c) => c?.sp.id === 'whitetip_reef' && !!c.rest && !p.night },
   { id: 'close', icon: '🤝', name: 'Close encounter', desc: 'A ★★★ photo of a curious animal circling you, from less than 4 m away — stay calm and let it come to you', test: (p, c) => !!c?.circling && p.stars === 3 && p.subject.dist < 4 },
 ];
 function completeGoal(g) { if (progress.goals[g.id]) return; progress.goals[g.id] = Date.now(); toast(`🎯 Challenge complete: ${g.name}`); saveProgress(); }
@@ -2371,6 +2733,6 @@ $('opt-time').onclick = e => { const v = e.target.closest('button')?.dataset.v; 
 renderSitePicker(); applyTouch(); setPanelMin(!!settings.panelMin);
 $('species-count').textContent = species.length;
 $('loading').hidden = true; $('picker').hidden = false;
-window.scuba = { lights: { torch, diverLamp, sun, hemi }, diverModel, step: (n, dt = 1 / 30, draw = true) => { skipRender = !draw; for (let i = 0; i < n; i++) frame(performance.now(), dt); skipRender = false; }, presence, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys }; // debug handle
+window.scuba = { lights: { torch, diverLamp, sun, hemi }, diverModel, step: (n, dt = 1 / 30, draw = true) => { skipRender = !draw; for (let i = 0; i < n; i++) frame(performance.now(), dt); skipRender = false; }, presence, CAUST, frameMs: () => frameMs, setCam: c => { debugCam = c; }, diver, startDive, sites, summon, SP, live: () => live, kinds, fps: () => fps, keys, darkAt, structs, camera }; // debug handle
 requestAnimationFrame(frame);
 })();
